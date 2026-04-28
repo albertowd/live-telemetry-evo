@@ -1,0 +1,39 @@
+[MASTER]
+# PySide6 is a C extension; let pylint introspect it instead of bailing on
+# every Qt symbol with c-extension-no-member.
+extension-pkg-allow-list=PySide6
+
+[TYPECHECK]
+# PySide6 Signal objects expose connect/emit/disconnect via runtime metaclass
+# magic that pylint cannot statically resolve. Treat any PySide6 attribute
+# access as known so bound signal calls do not trigger no-member.
+generated-members=PySide6.*
+
+[FORMAT]
+max-line-length=180
+
+[BASIC]
+# Wheel position labels (FL/FR/RL/RR), single-letter loop vars and the canonical
+# logger handle stay readable as-is.
+good-names=p,d,e,f,t,n,T,FL,FR,RL,RR
+
+[MESSAGES CONTROL]
+# - too-few-public-methods: dataclasses + Qt widgets often only override one
+#   or two methods; the heuristic produces noise here.
+# - too-many-instance-attributes: telemetry data classes legitimately have many
+#   fields (one per measurement).
+# - too-many-arguments / too-many-positional-arguments: Qt constructors and
+#   layout helpers commonly take several positional params.
+# - too-many-locals: paintEvent methods aggregate per-frame state.
+# - missing-module-docstring / missing-function-docstring: project favours
+#   self-describing names over module/function docstring boilerplate.
+# - unused-argument: Qt event handlers receive events we sometimes ignore.
+disable=
+    too-few-public-methods,
+    too-many-instance-attributes,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-locals,
+    missing-module-docstring,
+    missing-function-docstring,
+    unused-argument

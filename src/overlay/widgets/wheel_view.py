@@ -133,12 +133,12 @@ class WheelView(QWidget):
     def _draw_dirt(self, p: QPainter, d: WheelData) -> None:
         full = QRectF(188.0, 128.0, 136.0, 116.0)
         dirt = max(0.0, min(4.0, d.tire_d)) / 4.0 * full.height()
-        bar = QRectF(full.x(), full.bottom() - dirt, full.width(), dirt)
+        dirt_rect = QRectF(full.x(), full.bottom() - dirt, full.width(), dirt)
         c = QColor(Colors.brown)
         c.setAlphaF(0.7)
         p.setPen(Qt.NoPen)
         p.setBrush(c)
-        p.drawRect(bar)
+        p.drawRect(dirt_rect)
 
     def _draw_camber(self, p: QPainter, d: WheelData) -> None:
         rect = QRectF(170.0, 256.0, 172.0, 15.0)

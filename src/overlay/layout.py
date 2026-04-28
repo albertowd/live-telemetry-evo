@@ -37,6 +37,8 @@ def pick_resolution(screen_height: int) -> tuple[str, float]:
 
 @dataclass(frozen=True)
 class WidgetPlacement:
+    """Absolute on-screen rectangle for a single overlay widget."""
+
     x: int
     y: int
     w: int

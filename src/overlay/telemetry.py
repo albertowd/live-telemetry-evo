@@ -32,6 +32,8 @@ class WheelData:
 
 @dataclass
 class EngineData:
+    """Engine telemetry sample (RPM, turbo boost, plus the rolling maxima)."""
+
     max_power: float = 500.0   # HP
     max_rpm: float = 8500.0
     max_turbo_boost: float = 1.2
@@ -41,6 +43,8 @@ class EngineData:
 
 @dataclass
 class TelemetryFrame:
+    """One full snapshot: engine state + per-wheel state for FL/FR/RL/RR."""
+
     engine: EngineData = field(default_factory=EngineData)
     wheels: dict[str, WheelData] = field(default_factory=lambda: {w: WheelData() for w in WHEEL_IDS})
 
@@ -65,6 +69,7 @@ class TelemetrySource(QObject):
             w.susp_m_t = 0.1
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
+        # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
         self._timer.timeout.connect(self._tick)
 
     def start(self) -> None:
