@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 # Logical pixel sizes inherited from the original AC plugin.
 ENGINE_LOGICAL_W = 512
-ENGINE_LOGICAL_H = 85
+ENGINE_LOGICAL_H = 100
 WHEEL_LOGICAL_W = 512
 WHEEL_LOGICAL_H = 271
 

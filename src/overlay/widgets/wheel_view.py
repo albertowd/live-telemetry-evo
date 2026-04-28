@@ -230,16 +230,17 @@ class WheelView(QWidget):
 
     def _draw_height(self, p: QPainter, d: WheelData) -> None:
         rect = QRectF(self._x_left(430.0, 64.0), 208.0, 64.0, 48.0)
-        if d.height < 0.02:
+        if d.height < 20.0:
             self._height_warn_until = time.monotonic() + WARNING_TIME_S
-        bg = Colors.red if time.monotonic() < self._height_warn_until else Colors.white
+        color = Colors.red if time.monotonic() < self._height_warn_until else Colors.white
 
-        _draw_tinted(p, "height", rect, bg)
+        _draw_tinted(p, "height", rect, color)
 
         p.setFont(label_font(16))
-        # Text colour contrasts with the icon fill.
-        p.setPen(Colors.white if bg is Colors.red else Colors.black)
-        p.drawText(rect, Qt.AlignCenter, f"{d.height:.1f} mm")
+        p.setPen(color)
+        text_rect = QRectF(rect.x() - 20.0, rect.y(),
+                           rect.width() + 40.0, rect.height())
+        p.drawText(text_rect, Qt.AlignCenter, f"{d.height:.1f} mm")
 
     def _draw_load(self, p: QPainter, d: WheelData) -> None:
         # The load circle stays centred over the tire and grows with load.

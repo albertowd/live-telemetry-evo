@@ -13,9 +13,9 @@ from ..telemetry import EngineData
 # Original AC plugin sizes — we paint in this logical coord system and let
 # the widget's actual size scale via QPainter transforms.
 LOGICAL_W = 512.0
-LOGICAL_H = 85.0
-RPM_BAR_RECT = QRectF(0.0, 0.0, LOGICAL_W, 50.0)
-BOOST_BAR_RECT = QRectF(0.0, 56.0, LOGICAL_W, 24.0)
+LOGICAL_H = 100.0
+BOOST_BAR_RECT = QRectF(0.0, 0.0, LOGICAL_W, 24.0)
+RPM_BAR_RECT = QRectF(0.0, 26.0, LOGICAL_W, 50.0)
 
 
 class EngineView(QWidget):
@@ -37,7 +37,7 @@ class EngineView(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.TextAntialiasing)
 
-        # Scale logical coords (512x85) into the actual widget rect.
+        # Scale logical coords (512x100) into the actual widget rect.
         sx = self.width() / LOGICAL_W
         sy = self.height() / LOGICAL_H
         p.scale(sx, sy)
@@ -67,12 +67,27 @@ class EngineView(QWidget):
         if d.max_turbo_boost > 0.05:
             b_ratio = max(0.0, d.turbo_boost / max(0.1, d.max_turbo_boost))
             b_color: QColor = Colors.white if b_ratio < 0.9 else Colors.green
-            b_fill = QRectF(BOOST_BAR_RECT)
-            b_fill.setWidth(BOOST_BAR_RECT.width() * b_ratio)
+            fill_w = BOOST_BAR_RECT.width() * b_ratio
+            b_fill = QRectF(BOOST_BAR_RECT.x(), BOOST_BAR_RECT.y(),
+                            fill_w, BOOST_BAR_RECT.height())
             p.fillRect(b_fill, b_color)
 
+            # Two-pass text: black where the fill is behind it, fill-color on
+            # the empty (black) part. Keeps the value readable at any boost.
             p.setFont(label_font(14))
+            text = f"{max(0.0, d.turbo_boost):.2f} bar"
+
+            p.save()
+            p.setClipRect(b_fill)
+            p.setPen(Colors.black)
+            p.drawText(BOOST_BAR_RECT, Qt.AlignCenter, text)
+            p.restore()
+
+            p.save()
+            p.setClipRect(QRectF(BOOST_BAR_RECT.x() + fill_w, BOOST_BAR_RECT.y(),
+                                 BOOST_BAR_RECT.width() - fill_w, BOOST_BAR_RECT.height()))
             p.setPen(b_color)
-            p.drawText(BOOST_BAR_RECT, Qt.AlignCenter, f"{max(0.0, d.turbo_boost):.2f} bar")
+            p.drawText(BOOST_BAR_RECT, Qt.AlignCenter, text)
+            p.restore()
 
         p.end()
