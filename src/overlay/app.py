@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import argparse
 import sys
 
 from PySide6.QtWidgets import QApplication
 
 from .layout import ScreenLayout, compute_layout
-from .telemetry import TelemetryFrame, TelemetrySource
+from .sources import make_source
+from .telemetry import TelemetryFrame
 from .widgets.engine_view import EngineView
 from .widgets.wheel_view import WheelView
 from .window import OverlayWindow
@@ -36,7 +38,21 @@ def _on_frame(frame: TelemetryFrame, engine: EngineView, wheels: dict[str, Wheel
         view.set_data(frame.wheels[wid])
 
 
-def run() -> int:
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="overlay", description="AC Evo telemetry overlay")
+    parser.add_argument(
+        "--source",
+        choices=("synthetic", "ac-evo"),
+        default="synthetic",
+        help="telemetry source: 'synthetic' (default, mock data) or 'ac-evo' (live game)",
+    )
+    parser.add_argument("--hz", type=int, default=60, help="sample rate in Hz (default: 60)")
+    return parser.parse_args(argv)
+
+
+def run(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+
     app = QApplication(sys.argv)
 
     screen = app.primaryScreen()
@@ -51,12 +67,13 @@ def run() -> int:
     _apply_layout(window, engine, wheels, layout)
     window.move(geom.x(), geom.y())
 
-    source = TelemetrySource(hz=60, parent=window)
+    source = make_source(args.source, hz=args.hz, parent=window)
     source.frame.connect(lambda f: _on_frame(f, engine, wheels))
     source.start()
 
     print(
-        f"[overlay] screen={geom.width()}x{geom.height()} "
+        f"[overlay] source={args.source} hz={args.hz} "
+        f"screen={geom.width()}x{geom.height()} "
         f"resolution={layout.resolution_name} multiplier={layout.multiplier:.2f} "
         f"engine={layout.engine.w}x{layout.engine.h} "
         f"wheel={layout.wheels['FL'].w}x{layout.wheels['FL'].h}"
