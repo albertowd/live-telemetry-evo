@@ -11,6 +11,7 @@ class WheelData:
     """Per-wheel telemetry sample. Field names mirror the AC plugin so the
     porting target stays familiar; AC Evo equivalents will be wired in later."""
     abs_active: bool = False
+    brake_t: float = 100.0    # brake disc temperature, C
     camber: float = 0.0       # radians, negative = top-in
     height: float = 0.0       # mm, ride height
     lock: bool = False
@@ -32,6 +33,7 @@ class EngineData:
 
     max_power: float = 500.0   # HP
     max_rpm: float = 8500.0
+    max_torque: float = 500.0  # Nm
     max_turbo_boost: float = 1.2
     rpm: float = 0.0
     turbo_boost: float = 0.0

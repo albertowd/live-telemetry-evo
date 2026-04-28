@@ -9,7 +9,12 @@ from PySide6.QtWidgets import QWidget
 
 from ..colors import Colors
 from ..fonts import label_font
-from ..interpolation import DEFAULT_TIRE_TEMP_CURVE, TirePsi, TireTemp
+from ..interpolation import (
+    DEFAULT_BRAKE_TEMP_CURVE,
+    DEFAULT_TIRE_TEMP_CURVE,
+    TirePsi,
+    TireTemp,
+)
 from ..resources import tinted
 from ..telemetry import WheelData
 
@@ -45,6 +50,7 @@ class WheelView(QWidget):
         self._data = WheelData()
         self._psi = TirePsi(ideal=26.0)
         self._temp = TireTemp(DEFAULT_TIRE_TEMP_CURVE)
+        self._brake_temp = TireTemp(DEFAULT_BRAKE_TEMP_CURVE)
         self._height_warn_until = 0.0
         self._lock_warn_until = 0.0
         self._lock_blink_t = 0.0
@@ -203,15 +209,19 @@ class WheelView(QWidget):
 
         if d.lock:
             self._lock_warn_until = time.monotonic() + WARNING_TIME_S
+
+        # Default tint reflects brake disc temperature; ABS/lock override it.
+        temp_color = QColor(self._brake_temp.interpolate_color(d.brake_t))
+
         if d.abs_active:
             color = Colors.blue
             self._lock_blink_t = 0.0
         elif time.monotonic() < self._lock_warn_until:
             self._lock_blink_t += delta_t
             blink_on = int(self._lock_blink_t / LOCK_BLINK_PERIOD_S) % 2 == 0
-            color = Colors.yellow if blink_on else Colors.white
+            color = Colors.yellow if blink_on else temp_color
         else:
-            color = Colors.white
+            color = temp_color
             self._lock_blink_t = 0.0
 
         _draw_tinted(p, "brake", rect, color)

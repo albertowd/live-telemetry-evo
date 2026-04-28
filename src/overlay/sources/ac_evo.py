@@ -377,6 +377,8 @@ class AcEvoTelemetrySource(TelemetrySource):
             e.max_rpm = float(st.maxRpm)
         if st.maxPower > 0.0:
             e.max_power = float(st.maxPower)
+        if st.maxTorque > 0.0:
+            e.max_torque = float(st.maxTorque)
         if st.maxTurboBoost > 0.0:
             e.max_turbo_boost = float(st.maxTurboBoost)
         for wid, idx in _WHEEL_INDEX.items():
@@ -394,6 +396,11 @@ class AcEvoTelemetrySource(TelemetrySource):
 
         braking = ph.brake > 0.0
         abs_enabled = ph.abs > 0.0
+        # A locked wheel only matters while the car is actually moving — at a
+        # standstill all four wheels have angular_speed ≈ 0 by definition,
+        # which would otherwise flag a permanent lock and make the indicator
+        # blink forever.
+        moving = float(ph.speedKmh) > 3.0
 
         for wid in WHEEL_IDS:
             idx = _WHEEL_INDEX[wid]
@@ -404,7 +411,8 @@ class AcEvoTelemetrySource(TelemetrySource):
             # Lock heuristic ported from lt_wheel_info.Data.update — wheel
             # locked when braking and either basically not turning or with
             # extreme slip.
-            w.lock = braking and slip > 0.0 and (abs(ang_speed) < 1.0 or slip > 0.5)
+            w.lock = (moving and braking and slip > 0.0
+                      and (abs(ang_speed) < 1.0 or slip > 0.5))
             w.abs_active = abs_enabled and braking and not w.lock and slip > 0.10
 
             w.camber = float(ph.camberRAD[idx])
@@ -424,6 +432,7 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.tire_t_i = float(ph.tyreTempI[idx])
             w.tire_t_m = float(ph.tyreTempM[idx])
             w.tire_t_o = float(ph.tyreTempO[idx])
+            w.brake_t = float(ph.brakeTemp[idx])
             # tyreWear: AC1 uses 0..100 (% remaining); the overlay expects
             # 0..1.
             w.tire_w = max(0.0, min(1.0, float(ph.tyreWear[idx]) / 100.0))

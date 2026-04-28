@@ -84,6 +84,11 @@ class SyntheticTelemetrySource(TelemetrySource):
 
             w.tire_w = max(0.94, w.tire_w - self._dt * 0.0003)
 
+            brake_heat_in = brake * (3.0 if is_front else 1.5)
+            brake_cool = 0.4
+            w.brake_t += (brake_heat_in - brake_cool) * self._dt * 30.0
+            w.brake_t = max(50.0, min(900.0, w.brake_t))
+
             hard_brake = brake > 0.35
             slip_mock = brake > 0.5 and random.random() < 0.05
             w.lock = hard_brake and slip_mock and is_front

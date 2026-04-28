@@ -30,10 +30,40 @@ class Curve:
 class Power(Curve):
     """RPM -> HP curve with peak-aware color coding."""
 
-    def __init__(self, torque_curve: list[tuple[float, float]]) -> None:
-        # Convert torque (Nm) to HP using the canonical 5252 constant.
-        hp_curve = [(rpm, (torque * rpm) / 5252.0) for rpm, torque in torque_curve]
+    def __init__(self, hp_curve: list[tuple[float, float]]) -> None:
         super().__init__(hp_curve)
+
+    @classmethod
+    def from_torque_curve(cls, torque_curve: list[tuple[float, float]]) -> "Power":
+        """Build from a torque-vs-RPM table via the canonical 5252 constant.
+        Used for the hardcoded mock curve when no live data is available."""
+        hp_curve = [(rpm, (torque * rpm) / 5252.0) for rpm, torque in torque_curve]
+        return cls(hp_curve)
+
+    @classmethod
+    def from_peaks(cls, max_torque: float, max_power_hp: float, max_rpm: float) -> "Power":
+        """Synthesize a Power curve from AC Evo's static peaks.
+
+        The game exposes maxTorque (Nm), maxPower (HP), and maxRpm but no
+        actual curve. We fit a torque-shaped curve with peak torque around
+        65% redline and peak power around 90%, then scale uniformly so the
+        peak HP matches max_power_hp regardless of unit conventions.
+        """
+        if max_rpm <= 0.0 or max_power_hp <= 0.0 or max_torque <= 0.0:
+            return cls.from_torque_curve(DEFAULT_TORQUE_CURVE)
+
+        shape = [
+            (max_rpm * 0.10, 0.50),
+            (max_rpm * 0.35, 0.85),
+            (max_rpm * 0.65, 1.00),  # peak torque
+            (max_rpm * 0.90, 0.93),  # peak power (HP highest here)
+            (max_rpm,        0.75),
+        ]
+        # HP ∝ torque × rpm; scale uniformly so peak HP == max_power_hp.
+        raw = [(rpm, max_torque * t * rpm) for rpm, t in shape]
+        peak = max(p[1] for p in raw)
+        scale = max_power_hp / peak if peak > 0.0 else 0.0
+        return cls([(rpm, hp * scale) for rpm, hp in raw])
 
     def interpolate_color(self, rpm: float) -> QColor:
         if self._max[1] <= 0.0:
@@ -99,4 +129,15 @@ DEFAULT_TIRE_TEMP_CURVE: list[tuple[float, float]] = [
     (90.0, 1.00),  # peak grip
     (110.0, 0.95),
     (140.0, 0.85),
+]
+
+
+# Brake disc temperature operating window. Cold below ~150 C and hot above
+# ~600 C reduce stopping power; race-pad sweet spot sits roughly 250-500 C.
+DEFAULT_BRAKE_TEMP_CURVE: list[tuple[float, float]] = [
+    (50.0, 0.85),
+    (200.0, 0.97),
+    (400.0, 1.00),  # peak
+    (600.0, 0.97),
+    (900.0, 0.85),
 ]
