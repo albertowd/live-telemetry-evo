@@ -37,6 +37,12 @@ class EngineData:
     max_turbo_boost: float = 1.2
     rpm: float = 0.0
     turbo_boost: float = 0.0
+    # AC1/Evo gear convention: 0=R, 1=N, 2+ = forward gears (display as N-1).
+    gear: int = 1
+    speed_kmh: float = 0.0
+    abs_level: float = 0.0     # > 0 = ABS aid enabled
+    tc_level: float = 0.0      # > 0 = traction control enabled
+    pit_limiter: bool = False
 
 
 @dataclass

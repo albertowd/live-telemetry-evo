@@ -49,6 +49,14 @@ class SyntheticTelemetrySource(TelemetrySource):
         e.rpm = 1200.0 + throttle * (e.max_rpm - 1500.0) + math.sin(t * 7.0) * 80.0
         e.turbo_boost = max(0.0, throttle * 1.0 + math.sin(t * 4.2) * 0.05)
         e.max_turbo_boost = max(e.max_turbo_boost, e.turbo_boost)
+        e.speed_kmh = max(0.0, throttle * 230.0 - brake * 40.0
+                          + math.sin(t * 0.8) * 15.0)
+        # Cycle through gears 1..5 over time so the readout actually moves.
+        e.gear = 2 + int((t * 0.4) % 5)
+        e.abs_level = 1.0
+        e.tc_level = 1.0
+        # Pit limiter pulses on briefly every ~30 s so the chip is visible.
+        e.pit_limiter = (math.sin(t * 0.21) > 0.97)
 
         for wid, w in self._frame.wheels.items():
             is_front = wid[0] == "F"

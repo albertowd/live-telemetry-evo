@@ -13,9 +13,21 @@ from ..telemetry import EngineData
 # Original AC plugin sizes — we paint in this logical coord system and let
 # the widget's actual size scale via QPainter transforms.
 LOGICAL_W = 512.0
-LOGICAL_H = 100.0
+LOGICAL_H = 120.0
 BOOST_BAR_RECT = QRectF(0.0, 0.0, LOGICAL_W, 24.0)
 RPM_BAR_RECT = QRectF(0.0, 26.0, LOGICAL_W, 50.0)
+LABEL_RECT = QRectF(0.0, 77.0, LOGICAL_W, 22.0)
+AIDS_RECT = QRectF(0.0, 100.0, LOGICAL_W, 20.0)
+
+
+def _format_gear(gear: int) -> str:
+    """AC1/Evo convention: 0=R, 1=N, 2+ = forward gears.
+    The driver expects forward gears displayed as 1, 2, 3..."""
+    if gear <= 0:
+        return "R"
+    if gear == 1:
+        return "N"
+    return str(gear - 1)
 
 
 class EngineView(QWidget):
@@ -42,7 +54,7 @@ class EngineView(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.TextAntialiasing)
 
-        # Scale logical coords (512x100) into the actual widget rect.
+        # Scale logical coords (512x120) into the actual widget rect.
         sx = self.width() / LOGICAL_W
         sy = self.height() / LOGICAL_H
         p.scale(sx, sy)
@@ -57,15 +69,18 @@ class EngineView(QWidget):
         rpm_fill.setWidth(RPM_BAR_RECT.width() * ratio)
         p.fillRect(rpm_fill, color)
 
-        # HP/RPM labels under the bar.
+        # HP / gear+speed / RPM labels under the bar.
         torque_at_rpm_hp = self._power.interpolate(d.rpm)
         hp = int(torque_at_rpm_hp * (1.0 + d.turbo_boost))
         p.setFont(label_font(20))
         p.setPen(color)
 
-        label_rect = QRectF(0.0, RPM_BAR_RECT.bottom() + 1, LOGICAL_W, 22.0)
-        p.drawText(label_rect, Qt.AlignLeft | Qt.AlignVCenter, f"  {hp} HP")
-        p.drawText(label_rect, Qt.AlignRight | Qt.AlignVCenter, f"{int(d.rpm)} RPM  ")
+        p.drawText(LABEL_RECT, Qt.AlignLeft | Qt.AlignVCenter, f"  {hp} HP")
+        p.drawText(LABEL_RECT, Qt.AlignCenter | Qt.AlignVCenter,
+                   f"{_format_gear(d.gear)}   {int(d.speed_kmh)} km/h")
+        p.drawText(LABEL_RECT, Qt.AlignRight | Qt.AlignVCenter, f"{int(d.rpm)} RPM  ")
+
+        self._draw_aids(p, d)
 
         # Boost bar (only meaningful when the car has a turbo).
         p.fillRect(BOOST_BAR_RECT, Colors.black)
@@ -96,3 +111,25 @@ class EngineView(QWidget):
             p.restore()
 
         p.end()
+
+    def _draw_aids(self, p: QPainter, d: EngineData) -> None:
+        """Driver-aid status row: PIT / TC / ABS chips, only when active."""
+        chips: list[tuple[str, QColor]] = []
+        if d.pit_limiter:
+            chips.append(("PIT", Colors.yellow))
+        if d.tc_level > 0.0:
+            chips.append(("TC", Colors.green))
+        if d.abs_level > 0.0:
+            chips.append(("ABS", Colors.blue))
+        if not chips:
+            return
+
+        chip_w = 80.0
+        total_w = chip_w * len(chips)
+        x = (LOGICAL_W - total_w) / 2.0
+        p.setFont(label_font(16))
+        for label, color in chips:
+            p.setPen(color)
+            p.drawText(QRectF(x, AIDS_RECT.y(), chip_w, AIDS_RECT.height()),
+                       Qt.AlignCenter, label)
+            x += chip_w

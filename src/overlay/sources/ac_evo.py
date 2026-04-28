@@ -393,6 +393,11 @@ class AcEvoTelemetrySource(TelemetrySource):
         # A rolling observed max keeps the boost bar usable even when the
         # static maxTurboBoost is missing or wrong (some mods report 0).
         e.max_turbo_boost = max(e.max_turbo_boost, e.turbo_boost)
+        e.gear = int(ph.gear)
+        e.speed_kmh = float(ph.speedKmh)
+        e.tc_level = float(ph.tc)
+        e.abs_level = float(ph.abs)
+        e.pit_limiter = bool(ph.pitLimiterOn)
 
         braking = ph.brake > 0.0
         abs_enabled = ph.abs > 0.0
