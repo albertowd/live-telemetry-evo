@@ -8,7 +8,8 @@ Cross-platform transparent, always-on-top desktop overlay for live telemetry cha
 - Always-on-top
 - Click-through toggle (`Ctrl+Alt+L`) so the overlay does not steal mouse input from the game
 - Drag-to-move when click-through is off
-- 60 Hz live chart with a numpy ring buffer (no per-frame allocations)
+- Engine bar (RPM/power + boost) + 2x2 wheel grid (FL/FR/RL/RR), ported from the original AC `LiveTelemetry` plugin
+- Per-wheel widgets: tire silhouette tinted by core temp, inner/middle/outer temp grid, pressure, suspension travel, wear, camber strip, ride-height, dirt overlay, lock/ABS indicator, dynamic load circle
 
 ## Setup
 
@@ -56,13 +57,17 @@ When click-through is OFF, drag the overlay with the left mouse button.
 
 ```
 src/overlay/
-├── __main__.py     # python -m overlay entry
-├── app.py          # wires window + chart + telemetry source
-├── window.py       # transparent / always-on-top / click-through window
-├── chart.py        # PyQtGraph ring-buffer plot
-└── telemetry.py    # synthetic data source (replace with AC Evo SHM reader)
+├── __main__.py             # python -m overlay entry
+├── app.py                  # builds engine row + 2x2 wheel grid, wires telemetry
+├── window.py               # transparent / always-on-top / click-through window
+├── colors.py               # palette ported from lt_colors.py
+├── interpolation.py        # Power, TirePsi, TireTemp interpolators
+├── telemetry.py            # mock TelemetrySource (EngineData + 4x WheelData)
+└── widgets/
+    ├── engine_view.py      # boost bar + RPM/power bar + HP/RPM labels
+    └── wheel_view.py       # tire, temps, pressure, suspension, wear, camber, height, dirt, lock, load
 ```
 
 ## Next steps
 
-`telemetry.py` currently emits a synthetic signal. To plug in real AC Evo data, replace `TelemetrySource._tick` with a reader for the game's shared-memory layout (or UDP feed) and emit the same `sample` dict shape (`throttle`, `brake`, `speed`, ...).
+`telemetry.py` currently emits a synthetic `TelemetryFrame` (engine + 4 wheels) at 60 Hz. To plug in real AC Evo data, replace `TelemetrySource._tick` with a shared-memory or UDP reader that fills the same `EngineData` and per-wheel `WheelData` dataclasses — the widgets do not need to change.
