@@ -17,6 +17,7 @@ from ..interpolation import (
 )
 from ..resources import tinted
 from ..telemetry import WheelData
+from .draggable import DraggableWidget
 
 
 LOGICAL_W = 512.0
@@ -41,7 +42,7 @@ def _draw_tinted(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
     p.drawPixmap(rect.topLeft(), pix)
 
 
-class WheelView(QWidget):
+class WheelView(DraggableWidget):
     """One wheel's full visualisation. ``wheel_id`` is FL/FR/RL/RR — used
     to mirror the layout for right-side wheels and tag the title."""
 

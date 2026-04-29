@@ -8,6 +8,7 @@ from ..colors import Colors
 from ..fonts import label_font
 from ..interpolation import DEFAULT_TORQUE_CURVE, Power
 from ..telemetry import EngineData
+from .draggable import DraggableWidget
 
 
 # Original AC plugin sizes — we paint in this logical coord system and let
@@ -30,7 +31,7 @@ def _format_gear(gear: int) -> str:
     return str(gear - 1)
 
 
-class EngineView(QWidget):
+class EngineView(DraggableWidget):
     """Engine widget: RPM/power bar + boost bar, ported from BoostBar/RPMPower."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
