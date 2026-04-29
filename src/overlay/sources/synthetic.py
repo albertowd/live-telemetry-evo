@@ -87,6 +87,10 @@ class SyntheticTelemetrySource(TelemetrySource):
 
             target_p = 26.0 + (w.tire_t_c - 80.0) * 0.04
             w.tire_p += (target_p - w.tire_p) * 0.02
+            # Synthetic ideal = 26 psi; mirrors what the game's
+            # tyre_normalized_pressure would publish so the pressure
+            # widget colour-bands the same in mock mode.
+            w.tire_p_norm = w.tire_p / 26.0
 
             heat_in = throttle * (1.2 if is_front else 1.0) + brake * (0.8 if is_front else 0.5)
             cool = 0.4

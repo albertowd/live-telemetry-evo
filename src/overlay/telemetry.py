@@ -21,6 +21,7 @@ class WheelData:
     tire_d: float = 0.0       # dirt level 0..4
     tire_l: float = 0.0       # load (5*kgf units used by the original Load circle)
     tire_p: float = 26.0      # pressure psi
+    tire_p_norm: float = 1.0  # game-reported pressure / ideal-for-compound
     tire_t_c: float = 80.0    # core temperature C
     tire_t_i: float = 80.0    # inner C
     tire_t_m: float = 80.0    # middle C

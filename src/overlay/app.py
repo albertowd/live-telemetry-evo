@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 from .layout import ScreenLayout, compute_layout
 from .sources import make_source
 from .telemetry import TelemetryFrame
+from .widgets.countdown import CountdownView
 from .widgets.engine_view import EngineView
 from .widgets.wheel_view import WheelView
 from .window import OverlayWindow
@@ -67,6 +68,24 @@ def run(argv: list[str] | None = None) -> int:
     _apply_layout(window, engine, wheels, layout)
     window.move(geom.x(), geom.y())
 
+    # Hide the telemetry widgets during the countdown — they reveal when
+    # the countdown finishes. The source still feeds frames the whole
+    # time so widgets show live data the instant they appear.
+    engine.hide()
+    for view in wheels.values():
+        view.hide()
+
+    countdown = CountdownView(window)
+    countdown.setGeometry(0, 0, layout.screen_w, layout.screen_h)
+    countdown.raise_()  # ensure it sits above any pre-shown chrome
+
+    def _reveal_widgets() -> None:
+        engine.show()
+        for view in wheels.values():
+            view.show()
+
+    countdown.finished.connect(_reveal_widgets)
+
     source = make_source(args.source, hz=args.hz, parent=window)
     source.frame.connect(lambda f: _on_frame(f, engine, wheels))
     source.start()
@@ -83,6 +102,7 @@ def run(argv: list[str] | None = None) -> int:
     # Default to click-through ON: a full-screen overlay must not steal mouse
     # input from the game underneath. User can toggle with Ctrl+Alt+L.
     window.toggle_click_through()
+    countdown.start()
     return app.exec()
 
 

@@ -48,7 +48,7 @@ class WheelView(QWidget):
         self._id = wheel_id
         self._is_left = wheel_id[1] == "L"
         self._data = WheelData()
-        self._psi = TirePsi(ideal=26.0)
+        self._psi = TirePsi()
         self._temp = TireTemp(DEFAULT_TIRE_TEMP_CURVE)
         self._brake_temp = TireTemp(DEFAULT_BRAKE_TEMP_CURVE)
         self._height_warn_until = 0.0
@@ -220,8 +220,12 @@ class WheelView(QWidget):
         temp_color = QColor(self._brake_temp.interpolate_color(d.brake_t))
 
         if d.abs_active:
-            color = Colors.blue
-            self._lock_blink_t = 0.0
+            # ABS modulating on this wheel: blink blue/temp so the moment
+            # the system intervenes is visible at a glance, mirroring the
+            # yellow lock-warning blink below.
+            self._lock_blink_t += delta_t
+            blink_on = int(self._lock_blink_t / LOCK_BLINK_PERIOD_S) % 2 == 0
+            color = Colors.blue if blink_on else temp_color
         elif time.monotonic() < self._lock_warn_until:
             self._lock_blink_t += delta_t
             blink_on = int(self._lock_blink_t / LOCK_BLINK_PERIOD_S) % 2 == 0
@@ -243,7 +247,7 @@ class WheelView(QWidget):
 
     def _draw_pressure(self, p: QPainter, d: WheelData) -> None:
         rect = QRectF(self._x_left(70.0, 60.0), 171.0, 60.0, 60.0)
-        color = QColor(self._psi.interpolate_color(d.tire_p))
+        color = QColor(self._psi.interpolate_color(d.tire_p_norm))
         _draw_tinted(p, "pressure", rect, color)
 
         # Label sits directly under the icon, in the same colour (mirrors AC plugin).

@@ -78,22 +78,16 @@ class Power(Curve):
 
 
 class TirePsi:
-    """Pressure colour interp around an ideal target."""
+    """Pressure colour bands around the game-reported normalized pressure
+    (1.0 = ideal cold pressure for the current compound)."""
 
-    def __init__(self, ideal: float = 26.0) -> None:
-        self._ideal = ideal
-
-    def normalised(self, psi: float) -> float:
-        return psi / self._ideal if self._ideal > 0.0 else 0.0
-
-    def interpolate_color(self, psi: float) -> QColor:
-        perc = self.normalised(psi)
-        if perc < 0.95:
+    def interpolate_color(self, norm: float) -> QColor:
+        if norm < 0.95:
             return Colors.blue
-        if perc < 1.00:
-            return lerp_color(Colors.blue, Colors.green, (perc - 0.95) / 0.05)
-        if perc < 1.05:
-            return lerp_color(Colors.green, Colors.red, (perc - 1.00) / 0.05)
+        if norm < 1.00:
+            return lerp_color(Colors.blue, Colors.green, (norm - 0.95) / 0.05)
+        if norm < 1.05:
+            return lerp_color(Colors.green, Colors.red, (norm - 1.00) / 0.05)
         return Colors.red
 
 

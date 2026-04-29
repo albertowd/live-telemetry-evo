@@ -37,15 +37,10 @@ class EngineView(QWidget):
         super().__init__(parent)
         self._data = EngineData()
         self._power = Power.from_torque_curve(DEFAULT_TORQUE_CURVE)
-        self._power_peaks: tuple[float, float, float] = (0.0, 0.0, 0.0)
         self.setMinimumSize(384, 64)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def set_data(self, data: EngineData) -> None:
-        peaks = (data.max_torque, data.max_power, data.max_rpm)
-        if peaks != self._power_peaks and all(v > 0.0 for v in peaks):
-            self._power = Power.from_peaks(*peaks)
-            self._power_peaks = peaks
         self._data = data
         self.update()
 

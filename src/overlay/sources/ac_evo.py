@@ -561,16 +561,6 @@ class AcEvoSharedMemoryReader:
         return mm.read()
 
 
-def _to_psi(pressure_value: float) -> float:
-    """Pressure unit normalisation.
-
-    AC1 ``wheelsPressure`` is already in psi for most cars. AC Evo's units
-    are not yet officially documented; if a future capture shows kPa, divide
-    by 6.895 here. Kept as a single hook so the fix is one line.
-    """
-    return pressure_value
-
-
 class AcEvoTelemetrySource(TelemetrySource):
     """Polls AC Evo shared memory and emits :class:`TelemetryFrame`.
 
@@ -632,8 +622,10 @@ class AcEvoTelemetrySource(TelemetrySource):
             self._reader.close()
             return
 
-        self._apply_physics(phys)
+        # Graphics first so physics can read the per-wheel lock flag it
+        # sets (abs_active gates on `not w.lock`).
         self._apply_graphics(graphics)
+        self._apply_physics(phys)
         self.frame.emit(self._frame)
 
     def _apply_static(self, st: _SPageFileStatic) -> None:
@@ -654,36 +646,35 @@ class AcEvoTelemetrySource(TelemetrySource):
         e.max_turbo_boost = max(e.max_turbo_boost, e.turbo_boost)
         e.gear = int(ph.gear)
         e.speed_kmh = float(ph.speedKmh)
-        # tc/abs are 0..1 setting strength. The indicator chips light on
-        # any non-zero level; tcInAction/absInAction can drive a separate
-        # "currently engaging" highlight in a follow-up.
+        # AC Evo dropped the static maxRpm field; the per-tick currentMaxRpm
+        # is the canonical replacement. Populating e.max_rpm makes the
+        # rpm-bar fallback (rpm/max_rpm) accurate per car instead of pinned
+        # to the generic 8500 default.
+        if ph.currentMaxRpm > 0:
+            e.max_rpm = float(ph.currentMaxRpm)
+        # tc/abs here are 0..1 *setting* strength — drives the chip's
+        # presence; the engaging-vs-idle dim is keyed off the ints below.
         e.tc_level = float(ph.tc)
         e.abs_level = float(ph.abs)
         e.pit_limiter = bool(ph.pitLimiterOn)
+        # tcInAction / absInAction are the documented "currently cutting"
+        # ints — the precise signal we want for the bright-vs-dim chip
+        # blink, more accurate than the HUD-level tc_active/abs_active
+        # bools in graphics.
+        e.tc_in_action = ph.tcInAction != 0
+        e.abs_in_action = ph.absInAction != 0
 
         braking = ph.brake > 0.0
-        # absInAction is true only while ABS is actually modulating the
-        # brakes — much more reliable than guessing from slip thresholds.
         abs_modulating = ph.absInAction != 0
-        # A locked wheel only matters while the car is actually moving — at a
-        # standstill all four wheels have angular_speed ≈ 0 by definition,
-        # which would otherwise flag a permanent lock and make the indicator
-        # blink forever.
-        moving = float(ph.speedKmh) > 3.0
 
         for wid in WHEEL_IDS:
             idx = _WHEEL_INDEX[wid]
             w = self._frame.wheels[wid]
 
             slip = float(ph.wheelSlip[idx])
-            ang_speed = float(ph.wheelAngularSpeed[idx])
-            # Lock heuristic ported from lt_wheel_info.Data.update — wheel
-            # locked when braking and either basically not turning or with
-            # extreme slip.
-            w.lock = (moving and braking and slip > 0.0
-                      and (abs(ang_speed) < 1.0 or slip > 0.5))
             # ABS active on this wheel = system is modulating + this wheel
-            # has the slip signature that triggered it.
+            # has the slip signature that triggered it. Per-wheel `lock`
+            # is sourced from the graphics tyre states in _apply_graphics.
             w.abs_active = abs_modulating and braking and not w.lock and slip > 0.10
 
             w.camber = float(ph.camberRAD[idx])
@@ -705,7 +696,7 @@ class AcEvoTelemetrySource(TelemetrySource):
             # AC1 wheelLoad is Newtons; the original Load circle code divides
             # by (5 * g) to get the "5*kgf" pseudo-unit it expected.
             w.tire_l = float(ph.wheelLoad[idx]) / (5.0 * 9.80665)
-            w.tire_p = _to_psi(float(ph.wheelsPressure[idx]))
+            w.tire_p = float(ph.wheelsPressure[idx])
             w.tire_t_c = float(ph.tyreCoreTemperature[idx])
             w.tire_t_i = float(ph.tyreTempI[idx])
             w.tire_t_m = float(ph.tyreTempM[idx])
@@ -742,11 +733,22 @@ class AcEvoTelemetrySource(TelemetrySource):
         rpm_percent = float(gr.rpm_percent)
         if rpm_percent > 0.0:
             e.rpm_percent = rpm_percent
-        # Driver-aid booleans straight from the game, no slip heuristics.
-        e.tc_in_action = bool(gr.tc_active)
-        e.abs_in_action = bool(gr.abs_active)
         e.shift_up_hint = bool(gr.is_change_up_rpm)
         e.shift_down_hint = bool(gr.is_change_down_rpm)
+
+        # Per-wheel lock flag — the game's own determination, replaces the
+        # speed/slip/angular-speed heuristic and avoids the standstill
+        # false positives the heuristic had to special-case.
+        # tyre_normalized_pressure is the game's own ratio against the
+        # compound's ideal cold pressure (1.0 = on target). Using it lets
+        # the colour bands track per-compound targets instead of a hard-
+        # coded 26 psi that goes red on most race rubber.
+        for wid, ts in (("FL", gr.tyre_lf), ("FR", gr.tyre_rf),
+                        ("RL", gr.tyre_lr), ("RR", gr.tyre_rr)):
+            w = self._frame.wheels[wid]
+            w.lock = bool(ts.data.lock)
+            if ts.data.tyre_normalized_pressure > 0.0:
+                w.tire_p_norm = float(ts.data.tyre_normalized_pressure)
 
         # Tyre compound names — duplicated across all 4 TyreStates, so we
         # read them once. ctypes c_char arrays come back as null-padded
