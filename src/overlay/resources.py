@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QPainter, QPixmap
 
 
-# resources/img sits next to src/, so go up two from this file.
-_IMG_DIR = Path(__file__).resolve().parents[2] / "resources" / "img"
+def _img_dir() -> Path:
+    """Locate ``resources/img`` whether running from source or frozen.
+
+    PyInstaller sets ``sys.frozen`` and unpacks bundled data under
+    ``sys._MEIPASS`` (a temp dir for one-file mode, the dist folder for
+    one-folder). The build script copies ``resources/img`` into that
+    same relative path. From a source checkout we fall back to the
+    project tree (``parents[2]`` of this file).
+    """
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        return base / "resources" / "img"
+    return Path(__file__).resolve().parents[2] / "resources" / "img"
+
+
+_IMG_DIR = _img_dir()
 
 # Per-icon source pixmaps loaded on demand (full-resolution alpha masks).
 _source_cache: dict[str, QPixmap] = {}

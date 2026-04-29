@@ -37,33 +37,35 @@ _VK_Q = 0x51
 _HK_ID_TOGGLE = 1
 _HK_ID_QUIT = 2
 
-if sys.platform == "win32":
-    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+if sys.platform != "win32":
+    raise OSError("AC Evo Telemetry Overlay is Windows-only")
 
-    _SetWindowPos = _user32.SetWindowPos
-    _SetWindowPos.argtypes = [
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-        ctypes.c_uint,
-    ]
-    _SetWindowPos.restype = ctypes.c_int
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
 
-    _GetWindowLongW = _user32.GetWindowLongW
-    _GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
-    _GetWindowLongW.restype = ctypes.c_long
+_SetWindowPos = _user32.SetWindowPos
+_SetWindowPos.argtypes = [
+    ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_uint,
+]
+_SetWindowPos.restype = ctypes.c_int
 
-    _SetWindowLongW = _user32.SetWindowLongW
-    _SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
-    _SetWindowLongW.restype = ctypes.c_long
+_GetWindowLongW = _user32.GetWindowLongW
+_GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_GetWindowLongW.restype = ctypes.c_long
 
-    _RegisterHotKey = _user32.RegisterHotKey
-    _RegisterHotKey.argtypes = [ctypes.c_void_p, ctypes.c_int,
-                                ctypes.c_uint, ctypes.c_uint]
-    _RegisterHotKey.restype = ctypes.c_int
+_SetWindowLongW = _user32.SetWindowLongW
+_SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+_SetWindowLongW.restype = ctypes.c_long
 
-    _UnregisterHotKey = _user32.UnregisterHotKey
-    _UnregisterHotKey.argtypes = [ctypes.c_void_p, ctypes.c_int]
-    _UnregisterHotKey.restype = ctypes.c_int
+_RegisterHotKey = _user32.RegisterHotKey
+_RegisterHotKey.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                            ctypes.c_uint, ctypes.c_uint]
+_RegisterHotKey.restype = ctypes.c_int
+
+_UnregisterHotKey = _user32.UnregisterHotKey
+_UnregisterHotKey.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_UnregisterHotKey.restype = ctypes.c_int
 
 
 def _force_topmost(hwnd: int) -> None:
@@ -73,7 +75,7 @@ def _force_topmost(hwnd: int) -> None:
     fullscreen games can shuffle Z-order when they (re-)take the foreground;
     re-issuing keeps the overlay visible without stealing focus.
     """
-    if sys.platform != "win32" or not hwnd:
+    if not hwnd:
         return
     flags = _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_SHOWWINDOW
     _SetWindowPos(ctypes.c_void_p(hwnd), ctypes.c_void_p(_HWND_TOPMOST),
@@ -87,7 +89,7 @@ def _apply_overlay_styles(hwnd: int) -> None:
     flags; we layer NOACTIVATE on top so even a click on the overlay (when
     not click-through) doesn't snap focus away from the running game.
     """
-    if sys.platform != "win32" or not hwnd:
+    if not hwnd:
         return
     handle = ctypes.c_void_p(hwnd)
     style = _GetWindowLongW(handle, _GWL_EXSTYLE)
@@ -126,7 +128,7 @@ class _HotkeyFilter(QAbstractNativeEventFilter):
         self._callbacks[hotkey_id] = callback
 
     def nativeEventFilter(self, event_type, message):
-        if sys.platform != "win32" or event_type != b"windows_generic_MSG":
+        if event_type != b"windows_generic_MSG":
             return False, 0
         msg = ctypes.cast(int(message), ctypes.POINTER(_MSG)).contents
         if msg.message == _WM_HOTKEY:
@@ -173,12 +175,10 @@ class OverlayWindow(QWidget):
         # Global hotkeys via Win32 RegisterHotKey. QShortcut won't work here —
         # WS_EX_NOACTIVATE + Qt.WindowDoesNotAcceptFocus mean the overlay
         # never receives keyboard focus, so widget-scoped shortcuts never fire.
-        self._hotkey_filter: _HotkeyFilter | None = None
-        if sys.platform == "win32":
-            self._hotkey_filter = _HotkeyFilter()
-            self._hotkey_filter.register(_HK_ID_TOGGLE, self.toggle_click_through)
-            self._hotkey_filter.register(_HK_ID_QUIT, QApplication.quit)
-            QApplication.instance().installNativeEventFilter(self._hotkey_filter)
+        self._hotkey_filter = _HotkeyFilter()
+        self._hotkey_filter.register(_HK_ID_TOGGLE, self.toggle_click_through)
+        self._hotkey_filter.register(_HK_ID_QUIT, QApplication.quit)
+        QApplication.instance().installNativeEventFilter(self._hotkey_filter)
 
         self.resize(640, 280)
 
@@ -200,7 +200,7 @@ class OverlayWindow(QWidget):
         # those up regardless of which window holds focus, and the hotkey
         # survives toggle_click_through recreating the native HWND.
         # MOD_NOREPEAT prevents auto-repeat when the user holds keys.
-        if sys.platform != "win32" or self._hotkeys_registered:
+        if self._hotkeys_registered:
             return
         mods = _MOD_CONTROL | _MOD_ALT | _MOD_NOREPEAT
         ok_l = _RegisterHotKey(None, _HK_ID_TOGGLE, mods, _VK_L)
@@ -212,7 +212,7 @@ class OverlayWindow(QWidget):
         self._hotkeys_registered = True
 
     def _unregister_hotkeys(self) -> None:
-        if sys.platform != "win32" or not self._hotkeys_registered:
+        if not self._hotkeys_registered:
             return
         _UnregisterHotKey(None, _HK_ID_TOGGLE)
         _UnregisterHotKey(None, _HK_ID_QUIT)
@@ -225,10 +225,9 @@ class OverlayWindow(QWidget):
     def toggle_click_through(self) -> None:
         self._click_through = not self._click_through
         self.setAttribute(Qt.WA_TransparentForMouseEvents, self._click_through)
-        if sys.platform == "win32":
-            self.setWindowFlags(self.windowFlags())
-            self.show()
-            _force_topmost(int(self.winId()))
+        self.setWindowFlags(self.windowFlags())
+        self.show()
+        _force_topmost(int(self.winId()))
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton and not self._click_through:

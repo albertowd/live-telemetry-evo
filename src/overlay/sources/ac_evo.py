@@ -55,27 +55,27 @@ from .base import TelemetrySource
 # when the name is not present, which is what we want.
 _FILE_MAP_READ = 0x0004
 
-if sys.platform == "win32":
-    _KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+if sys.platform != "win32":
+    raise OSError("AC Evo Telemetry Overlay is Windows-only")
 
-    _OpenFileMappingW = _KERNEL32.OpenFileMappingW
-    _OpenFileMappingW.argtypes = [ctypes.c_uint32, ctypes.c_int32, ctypes.c_wchar_p]
-    _OpenFileMappingW.restype = ctypes.c_void_p
+_KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
-    _MapViewOfFile = _KERNEL32.MapViewOfFile
-    _MapViewOfFile.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
-                               ctypes.c_uint32, ctypes.c_uint32, ctypes.c_size_t]
-    _MapViewOfFile.restype = ctypes.c_void_p
+_OpenFileMappingW = _KERNEL32.OpenFileMappingW
+_OpenFileMappingW.argtypes = [ctypes.c_uint32, ctypes.c_int32, ctypes.c_wchar_p]
+_OpenFileMappingW.restype = ctypes.c_void_p
 
-    _UnmapViewOfFile = _KERNEL32.UnmapViewOfFile
-    _UnmapViewOfFile.argtypes = [ctypes.c_void_p]
-    _UnmapViewOfFile.restype = ctypes.c_int32
+_MapViewOfFile = _KERNEL32.MapViewOfFile
+_MapViewOfFile.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                           ctypes.c_uint32, ctypes.c_uint32, ctypes.c_size_t]
+_MapViewOfFile.restype = ctypes.c_void_p
 
-    _CloseHandle = _KERNEL32.CloseHandle
-    _CloseHandle.argtypes = [ctypes.c_void_p]
-    _CloseHandle.restype = ctypes.c_int32
-else:  # pragma: no cover - non-Windows shouldn't import this module
-    _KERNEL32 = None
+_UnmapViewOfFile = _KERNEL32.UnmapViewOfFile
+_UnmapViewOfFile.argtypes = [ctypes.c_void_p]
+_UnmapViewOfFile.restype = ctypes.c_int32
+
+_CloseHandle = _KERNEL32.CloseHandle
+_CloseHandle.argtypes = [ctypes.c_void_p]
+_CloseHandle.restype = ctypes.c_int32
 
 
 class _NamedMapping:
@@ -86,8 +86,6 @@ class _NamedMapping:
     """
 
     def __init__(self, name: str, size: int) -> None:
-        if sys.platform != "win32":
-            raise OSError("AC Evo shared memory is Windows-only")
         handle = _OpenFileMappingW(_FILE_MAP_READ, False, name)
         if not handle:
             err = ctypes.get_last_error()
@@ -511,13 +509,11 @@ class AcEvoSharedMemoryReader:
         self._static_mm: Optional[_NamedMapping] = None
 
     def open(self) -> None:
-        """Attach to the three named shared-memory blocks. Windows-only.
+        """Attach to the three named shared-memory blocks.
 
         Raises :class:`FileNotFoundError` when the game is not running, so
         the caller can distinguish "not connected yet" from real errors.
         """
-        if sys.platform != "win32":
-            raise OSError("AC Evo shared memory is Windows-only")
         self._physics_mm = _NamedMapping(PHYSICS_TAG, PHYSICS_SIZE)
         try:
             self._graphics_mm = _NamedMapping(GRAPHICS_TAG, GRAPHICS_SIZE)

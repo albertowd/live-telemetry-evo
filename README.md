@@ -1,100 +1,289 @@
 # AC Evo Telemetry Overlay
 
-Cross-platform transparent, always-on-top desktop overlay for live telemetry charts. Built with **PySide6** + **PyQtGraph**.
+Transparent, always-on-top desktop overlay that displays live engine and per-wheel
+telemetry on top of **Assetto Corsa Evo** (or any other window). Built with **PySide6**
+and ported from the original AC1 *LiveTelemetry* plugin.
 
-## Features
+The overlay reads AC Evo's three named shared-memory blocks (`Local\acevo_pmf_physics`,
+`…_graphics`, `…_static`) when the game is running, or falls back to a synthetic data
+generator for development and screenshots.
 
-- Frameless, translucent window that draws over other apps (including fullscreen-windowed games)
-- Always-on-top
-- Click-through toggle (`Ctrl+Alt+L`) so the overlay does not steal mouse input from the game
-- Drag-to-move when click-through is off
-- Engine bar (RPM/power + boost) + 2x2 wheel grid (FL/FR/RL/RR), ported from the original AC `LiveTelemetry` plugin
-- Per-wheel widgets: tire silhouette tinted by core temp, inner/middle/outer temp grid, pressure, suspension travel, wear, camber strip, ride-height, dirt overlay, lock/ABS indicator, dynamic load circle
+---
 
-## Setup
+## Quick start
+
+### Option A — run the prebuilt executable
+
+1. Build it once with `python build.py` (see [Building a redistributable
+   executable](#building-a-redistributable-executable)).
+2. Double-click `dist\ACEvoOverlay-<version>.exe`.
+3. Start AC Evo. The overlay attaches automatically as soon as the game publishes
+   shared memory; until then it shows the synthetic mock so you can see the layout.
+4. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+Q` to quit.
+
+### Option B — run from source
 
 The project uses a local virtual environment so it does not touch the system Python.
-
-### Windows (PowerShell)
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-### macOS / Linux
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Run
-
-From an activated venv:
-
-```bash
 python -m overlay
 ```
 
-Or use the launchers (which use the venv's Python directly, no activation needed):
+Or use `run.bat`, which uses the venv's Python directly (no activation needed).
 
-- Windows: `run.bat`
-- macOS/Linux: `./run.sh`
-
-### Telemetry source
+### Command-line flags
 
 ```bash
-python -m overlay --source synthetic   # default: mock data, no game required
-python -m overlay --source ac-evo      # live AC Evo shared memory (Windows + game running)
+python -m overlay --source synthetic   # default — animated mock data, no game required
+python -m overlay --source ac-evo      # live AC Evo shared memory (game must be running)
+python -m overlay --hz 120             # sample rate in Hz (default: 60)
 ```
 
-The AC Evo source attaches to the three named shared-memory blocks the game publishes (`Local\acevo_pmf_physics`, `…_graphics`, `…_static`) via Win32 `OpenFileMappingW`. If the game isn't running, the source polls quietly and connects automatically when AC Evo starts publishing.
+The `ac-evo` source attaches via Win32 `OpenFileMappingW`. If the game isn't running it
+polls quietly once a second and connects automatically when AC Evo starts publishing.
 
-### Inspecting live shared memory
+---
 
-When the game is running, dump real bytes/parsed fields to iterate on the struct layout:
+## Controls
+
+### Hotkeys (registered globally)
+
+| Shortcut     | Action                                                              |
+| ------------ | ------------------------------------------------------------------- |
+| `Ctrl+Alt+L` | Toggle click-through (lock / unlock the overlay for repositioning). |
+| `Ctrl+Alt+Q` | Quit the overlay.                                                   |
+
+These use Win32 `RegisterHotKey`, so they fire even while the game has focus.
+
+### Mouse — when the overlay is unlocked (click-through OFF)
+
+| Action                       | Result                                                       |
+| ---------------------------- | ------------------------------------------------------------ |
+| Drag a widget                | Move it; position is persisted across sessions.              |
+| Click the `×` on a widget    | Hide it; the hidden state persists across sessions.          |
+| Click the `↺` (reset) button | Restore default positions and visibility for every widget.   |
+| Click the size button        | Cycle through `XS → S → M → L → XL → XS …`. Persists.        |
+
+The reset and size buttons are draggable but have no `×`, so the layout is always
+recoverable even if you hide everything else.
+
+### Startup behaviour
+
+- **Click-through is ON by default** so the overlay never steals mouse input from the
+  game. Toggle it off (`Ctrl+Alt+L`) only when you want to drag/resize.
+- A 5-second countdown is drawn full-screen before the telemetry widgets reveal. The
+  source still feeds frames during the countdown so values are live the moment the
+  widgets appear.
+- Widgets you hid in a previous session stay hidden; the reset button brings them back.
+
+---
+
+## What the HUD shows
+
+All widgets are painted in a logical coordinate system and scaled per screen, so the
+absolute pixel sizes here are reference values for the multiplier-1.0 baseline (1440p
+nominal). The overlay picks a multiplier from the screen's vertical resolution and
+multiplies it by your size factor (XS = 0.5 … XL = 1.5).
+
+### Engine bar (top-centred at the bottom of the screen)
+
+```
+┌─────────────────────────── boost bar ───────────────────────────┐
+│                                                                 │
+├─────────────────────────── RPM bar ─────────────────────────────┤
+│                                                                 │
+│   1234 HP                  3   148 km/h                7820 RPM │
+│                       PIT      TC       ABS                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| Element     | What it shows                                                                         |
+| ----------- | ------------------------------------------------------------------------------------- |
+| Boost bar   | Current turbo boost as a fraction of `max_turbo_boost` (white below 90 %, green above). Hidden on naturally-aspirated cars (`max_turbo_boost ≤ 0.05`). The numeric label is `bar`, two-pass painted so it's legible over both filled and empty regions. |
+| RPM bar     | Engine speed as a fraction of redline. Uses `rpm_percent` from the graphics block when available, otherwise `rpm / max_rpm`. Colour normally tracks the power curve (white → blue → green at peak power → red past peak), but a **shift-up hint forces red** (treat as a shift light) and a **shift-down hint forces blue**. |
+| HP label    | `current_bhp` from the graphics block when available; otherwise the synthesised power curve interpolated at the current RPM, scaled by `(1 + boost)` as a rough boosted-output approximation. |
+| Gear label  | `R` (reverse), `N` (neutral) or the forward gear number — matches AC's `0=R, 1=N, 2+=forward` convention. Speed in km/h sits next to it. |
+| RPM label   | Live engine speed in RPM.                                                             |
+| Aid chips   | `PIT` (yellow) — pit limiter active. `TC` (green) — traction control enabled; **bright when actually cutting**, dim (alpha 0.4) when armed but idle. `ABS` (blue) — same scheme. Chips are hidden when the corresponding aid is disabled (`level == 0`). |
+
+### Wheel widget (one per corner; FL/FR/RL/RR)
+
+Right-side wheels are mirrored so the *outer* edge always faces the screen edge. The
+icons are tinted PNGs cached as alpha masks and re-coloured every frame.
+
+```
+┌──────────────────────────────────────────┐ FL
+│ wear │  brake │   tire silhouette  │ susp│
+│ bar  │   60×60│   + temp grid      │  bar│
+│      │        │   + dirt overlay   │     │
+│      │        │   + load circle    │     │
+│      │  pres- │                    │ ride│
+│      │  sure  │                    │ hght│
+│      │  60×60 │   ── camber strip ─│     │
+└──────────────────────────────────────────┘
+       80 °C       (FL / SOF)         32 mm
+       26.4 psi
+```
+
+| Element               | What it shows                                                                                                                                                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Tire silhouette       | Tinted by **composite tyre temperature**: 75 % core + 25 % average of inner/middle/outer. The colour tracks the per-compound normalised temperature when the source publishes it (1.0 = on target), so the band stays correct across compounds. |
+| Inner / middle / outer temp grid | Three columns, each with a top and a bottom rectangle, coloured by that face's temperature. Lets you spot a single-edge overheat (camber too aggressive) or one-corner cooking. |
+| Core temp band        | Central horizontal band over the silhouette, alpha 85 %, coloured by core temperature. |
+| Dirt overlay          | Brown rectangle that grows from the bottom of the silhouette. `tire_d` is clamped to 0…4; full overlay = wheel is filthy. |
+| Tyre-load circle      | White ring centred on the silhouette. Diameter scales linearly with vertical wheel load: **0.049 px / N**, clamped to 40…256 px. A typical static corner load (~3 000 N) fills the inner half; the ring saturates around ~5 200 N. |
+| Camber strip          | A trapezoidal strip below the silhouette. The horizontal edge stays flat; the top edge tilts proportional to `tan(camber_rad) × strip_width`, so heavy negative camber leans inward and positive camber leans outward. Visual only — there is no numeric readout. |
+| Suspension bar        | Tinted suspension graphic on the **outer** side of the wheel. The colour band reflects how close to the bump-stops you are: white = mid-travel, **yellow** outside ±10 % of the calibrated max, **red** outside ±5 %. The inner fill is the original AC plugin convention — the bar **fills at full extension and shrinks as the suspension compresses** (height ∝ `1 − travel_ratio`). Counter-intuitive vs a typical "load grows" gauge but kept for parity. The max travel auto-calibrates from observation, since AC Evo no longer publishes a per-car `suspensionMaxTravel`. |
+| Wear bar              | Thin vertical bar on the **inner** side. AC Evo's wear scale is small (1.0 = fresh, ~0.85 = significantly worn), so the bar maps the **0.85 → 1.00 range** to its full height. Green > 0.95, yellow > 0.90, red below. |
+| Brake icon (top-inner)| Tinted by **brake disc temperature** (curve peak ≈ 400 °C; cold below ~150 °C and hot above ~600 °C reduce stopping power). Per-wheel **lock** triggers a 0.5 s yellow blink; **ABS modulating on this wheel** triggers a continuous blue blink. The °C label below the icon stays in the temperature-tint colour for legibility. |
+| Pressure icon (mid-inner) | Tinted by **normalised pressure** (1.0 = ideal cold pressure for the current compound). Bands sit tight: green within ±0.02 of 1.0, lerp through 0.01, then solid blue (under) or red (over). The label is the **raw psi value**. |
+| Ride-height icon (outer-bottom) | White most of the time. Drops to red for 0.5 s when the height falls below 20 mm (bottoming-out warning). Label in mm. AC Evo cars publish per-axle ride height in metres for some cars and millimetres for others — the source auto-detects: any value with `|height| ≥ 1.0` is treated as mm, otherwise it's metres × 1000. |
+| Wheel ID + compound   | `FL` / `FR` / `RL` / `RR` and, below it, the first three uppercase chars of the active compound (`SOF`, `MED`, `HAR`, `INT`, `WET`). |
+
+### Colour reference (when in doubt, glance here)
+
+| Colour | RPM bar          | Tyre temp / pressure         | Brake temp / wear / suspension |
+| ------ | ---------------- | ---------------------------- | ------------------------------ |
+| white  | safely below peak | (transitional only)          | mid-range / OK                 |
+| blue   | shift-down hint, or near-peak just before the redline | below ideal (cold tyre / underpressure / cold brake) | (only as the ABS blink)        |
+| green  | at peak power    | on target (within ideal band) | excellent / pad in window       |
+| red    | past peak (or shift-up hint) | above ideal (hot / overpressure / hot brake) | bad — bottoming, locked, fully worn, on the bump-stops |
+| yellow | —                | —                            | warning band (close to limit, lock blink, pit limiter) |
+| brown  | —                | —                            | dirt overlay                    |
+
+---
+
+## Per-frame data fields
+
+Each `TelemetryFrame` carries:
+
+**Engine** — `rpm`, `max_rpm`, `gear`, `speed_kmh`, `turbo_boost`, `max_turbo_boost`,
+`abs_level`, `tc_level`, `pit_limiter`, plus AC Evo graphics-block fields when
+available: `current_bhp`, `current_torque`, `rpm_percent`, `tc_in_action`,
+`abs_in_action`, `shift_up_hint`, `shift_down_hint`.
+
+**Wheel (×4)** — `tire_t_c`/`tire_t_i`/`tire_t_m`/`tire_t_o` (core / inner / middle /
+outer °C) plus matching per-compound `tire_t_norm_*` (1.0 = ideal), `tire_p` (psi) +
+`tire_p_norm`, `tire_l` (vertical load, N), `tire_w` (wear, 1.0 = fresh), `tire_d`
+(dirt 0…4), `camber` (rad), `susp_t` / `susp_m_t` (current / calibrated-max travel,
+m), `height` (mm), `brake_t` (°C) + `brake_t_norm`, `lock`, `abs_active`, `compound`.
+
+The fields are populated either by the synthetic generator (animated coherent
+"lap"), or read straight from AC Evo's three shared-memory blocks. Wheel order
+in every per-wheel array is `[FL, FR, RL, RR]` — both AC1 and AC Evo agree on this.
+
+A semantic gotcha: AC Evo's `tyreWear` is **0.0 = new, 1.0 = fully worn** (opposite of
+AC1's "% remaining"). The source flips it so the overlay can keep treating `tire_w`
+as "remaining grip".
+
+---
+
+## Persistence
+
+State is stored as a single JSON file at
+`%APPDATA%\LiveTelemetryAcEvo\Overlay\positions.json`
+(`QStandardPaths.AppConfigLocation`).
+
+Schema:
+
+```json
+{
+  "engine": { "x": 700, "y": 16, "visible": true },
+  "FL":     { "x": 16,  "y": 200 },
+  "size_index": 2
+}
+```
+
+A position is honoured on next launch only if the widget would land fully on screen
+at the current resolution; otherwise it falls back to the layout default. The reset
+button wipes only the telemetry-widget entries — the placement of the floating reset
+and size buttons themselves is preserved.
+
+---
+
+## Building a redistributable executable
+
+```powershell
+.venv\Scripts\python build.py
+```
+
+Reads the version from `pyproject.toml`, converts `resources/img/icon.png` to
+`resources/icon.ico` (Pillow), then invokes PyInstaller in one-file windowed mode:
+
+- Output: `dist/ACEvoOverlay-<version>.exe`
+- Bundles the `resources/img` directory so the icon PNGs ship with the binary.
+- Removes the one-folder fallback PyInstaller drops alongside the onefile binary.
+
+Requires the dev extras:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+---
+
+## Inspecting live shared memory
+
+When the game is running, dump real bytes / parsed fields to verify the struct
+layout or hunt unknown offsets:
 
 ```bash
 python -m overlay.sources.dump physics --parsed
-python -m overlay.sources.dump physics --bytes 256
-python -m overlay.sources.dump static --parsed --watch 1.0
+python -m overlay.sources.dump graphics --parsed
+python -m overlay.sources.dump static  --parsed --watch 1.0
+python -m overlay.sources.dump physics --bytes 256                # raw hex window
+python -m overlay.sources.dump physics --scan 0.5 1.0             # aligned floats in [LO,HI]
+python -m overlay.sources.dump physics --track-monotonic 60 0.5 1.0   # 60 s, find wear-like fields
 ```
 
-## Hotkeys
+The `--scan` and `--track-monotonic` modes are useful when AC Evo extends the layout
+and the overlay needs to be re-pointed at a moved field.
 
-| Shortcut       | Action                              |
-| -------------- | ----------------------------------- |
-| `Ctrl+Alt+L`   | Toggle click-through (lock overlay) |
-| `Ctrl+Alt+Q`   | Quit                                |
+---
 
-When click-through is OFF, drag the overlay with the left mouse button.
-
-## Layout
+## Project layout
 
 ```
 src/overlay/
-├── __main__.py             # python -m overlay entry
-├── app.py                  # CLI parsing, screen-relative layout, ties widgets+source
-├── window.py               # transparent / always-on-top / click-through window
-├── layout.py               # screen-size -> multiplier + corner placements
-├── colors.py               # palette ported from lt_colors.py
-├── fonts.py                # explicit font family chain
-├── interpolation.py        # Power, TirePsi, TireTemp interpolators
-├── resources.py            # PNG load + scaled-mask cache + tint helper
-├── telemetry.py            # data shapes (TelemetryFrame / EngineData / WheelData)
+├── __main__.py                # `python -m overlay` entry point
+├── app.py                     # CLI parsing, layout + size cycling, ties widgets to the source
+├── window.py                  # frameless / translucent / always-on-top window + Win32 hotkeys
+├── layout.py                  # screen-size → multiplier and corner placements
+├── settings.py                # JSON-backed positions / visibility / size persistence
+├── colors.py                  # palette ported from lt_colors.py
+├── fonts.py                   # explicit font family chain
+├── interpolation.py           # Power, TirePsi, TireTemp interpolators
+├── resources.py               # PNG load + scaled-mask cache + tint helper
+├── telemetry.py               # data shapes (TelemetryFrame / EngineData / WheelData)
 ├── sources/
-│   ├── base.py             # TelemetrySource (Qt object emitting `frame`)
-│   ├── synthetic.py        # mock data generator (default)
-│   ├── ac_evo.py           # AC Evo shared-memory reader (Win32 OpenFileMappingW)
-│   └── dump.py             # python -m overlay.sources.dump for SHM debugging
+│   ├── base.py                # TelemetrySource (Qt object emitting `frame`)
+│   ├── synthetic.py           # mock data generator (default)
+│   ├── ac_evo.py              # AC Evo shared-memory reader (Win32 OpenFileMappingW)
+│   └── dump.py                # `python -m overlay.sources.dump` for SHM debugging
 └── widgets/
-    ├── engine_view.py      # boost bar + RPM/power bar + HP/RPM labels
-    └── wheel_view.py       # tire, temps, pressure, suspension, wear, camber, height, dirt, lock, load
+    ├── countdown.py           # full-screen 5 s countdown shown at startup
+    ├── draggable.py           # base widget — drag, click, close button
+    ├── engine_view.py         # boost bar + RPM/power bar + HP/RPM labels + aid chips
+    ├── wheel_view.py          # tire, temps, pressure, suspension, wear, camber, height, dirt, lock, load
+    ├── reset_button.py        # floating ↺ button — restores default layout
+    └── size_button.py         # floating XS/S/M/L/XL button — cycles widget size
 ```
 
-## Next steps
+Widgets only know about `TelemetryFrame` shapes, so swapping the synthetic source for
+the live AC Evo reader (or any future source) does not touch any UI code.
 
-The AC Evo source (`sources/ac_evo.py`) is wired up but its struct layout is **best-effort** — seeded from the AC1 SDK plus the publicly confirmed AC Evo field names (`speedKmh`, `rpms`, `gear`, etc.). Once the game is running, use `python -m overlay.sources.dump physics --parsed` to verify which fields land at which offsets, then adjust `_SPageFilePhysics` / `_SPageFileStatic` in `sources/ac_evo.py`. The widgets and synthetic source do not need to change.
+---
+
+## Caveats
+
+- **AC Evo's struct layout is still partially undocumented.** The structs in
+  `sources/ac_evo.py` are seeded from the AC1 SDK plus the publicly confirmed AC Evo
+  field names, with each value range-clamped to keep a wrong offset visible-but-bounded
+  rather than crashy. If a field looks suspicious for a particular car, run the dump
+  tool against a live session and confirm offsets before adjusting.
+- **Click-through default is ON.** This is deliberate — a full-screen overlay must
+  not steal mouse input from the game. Toggle it off with `Ctrl+Alt+L` before trying
+  to drag a widget.

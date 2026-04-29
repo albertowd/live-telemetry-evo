@@ -25,8 +25,6 @@ from PySide6.QtCore import QStandardPaths
 
 def _settings_dir() -> Path:
     base = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
-    if not base:
-        base = str(Path.home() / ".live-telemetry-ac-evo")
     p = Path(base)
     p.mkdir(parents=True, exist_ok=True)
     return p
