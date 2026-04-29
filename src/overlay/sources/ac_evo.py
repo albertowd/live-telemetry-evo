@@ -246,28 +246,38 @@ class _SPageFilePhysics(ctypes.Structure):
 
 
 class _SPageFileStatic(ctypes.Structure):
-    """Best-effort AC Evo static layout (used to seed maxRpm /
-    suspensionMaxTravel / maxTurboBoost / maxPower)."""
+    """AC Evo SPageFileStaticEvo — session/track metadata, written once at
+    session load.
+
+    Note vs AC1: the static block is no longer car-focused. The AC1 fields
+    ``maxRpm`` / ``maxPower`` / ``maxTorque`` / ``suspensionMaxTravel`` /
+    ``maxTurboBoost`` are gone. Live engine values now arrive via the
+    graphics block (``current_bhp``, ``rpm_percent``, ``max_turbo_boost``,
+    ``max_fuel``); per-wheel suspension max travel is calibrated by
+    rolling max in physics.
+    """
 
     _pack_ = 4
     _fields_ = [
-        ("smVersion", c_wchar * 15),
-        ("acVersion", c_wchar * 15),
-        ("numberOfSessions", c_int32),
-        ("numCars", c_int32),
-        ("carModel", c_wchar * 33),
-        ("track", c_wchar * 33),
-        ("playerName", c_wchar * 33),
-        ("playerSurname", c_wchar * 33),
-        ("playerNick", c_wchar * 33),
-        ("sectorCount", c_int32),
-        ("maxTorque", c_float),
-        ("maxPower", c_float),
-        ("maxRpm", c_int32),
-        ("maxFuel", c_float),
-        ("suspensionMaxTravel", c_float * 4),
-        ("tyreRadius", c_float * 4),
-        ("maxTurboBoost", c_float),
+        ("sm_version", c_char * 15),
+        ("ac_evo_version", c_char * 15),
+        ("session", c_int32),                       # ACEVO_SESSION_TYPE enum
+        ("session_name", c_char * 33),
+        ("event_id", c_uint8),
+        ("session_id", c_uint8),
+        ("starting_grip", c_int32),                 # ACEVO_STARTING_GRIP enum
+        ("starting_ambient_temperature_c", c_float),
+        ("starting_ground_temperature_c", c_float),
+        ("is_static_weather", c_bool),
+        ("is_timed_race", c_bool),
+        ("is_online", c_bool),
+        ("number_of_sessions", c_int32),
+        ("nation", c_char * 33),
+        ("longitude", c_float),
+        ("latitude", c_float),
+        ("track", c_char * 33),
+        ("track_configuration", c_char * 33),
+        ("track_length_m", c_float),
     ]
 
 
@@ -627,25 +637,13 @@ class AcEvoTelemetrySource(TelemetrySource):
         self.frame.emit(self._frame)
 
     def _apply_static(self, st: _SPageFileStatic) -> None:
-        e = self._frame.engine
-        if st.maxRpm > 0:
-            e.max_rpm = float(st.maxRpm)
-        if st.maxPower > 0.0:
-            e.max_power = float(st.maxPower)
-        if st.maxTorque > 0.0:
-            e.max_torque = float(st.maxTorque)
-        if st.maxTurboBoost > 0.0:
-            e.max_turbo_boost = float(st.maxTurboBoost)
-        # AC Evo's static block is session-focused; suspensionMaxTravel
-        # isn't in there anymore. Reading from the legacy AC1 offset turns
-        # up garbage. Gate on a plausible range (10 mm .. 500 mm covers
-        # everything from formula cars to off-road). Anything outside that
-        # window is left at its default (0.1 m) and refined per-tick by the
-        # rolling-max calibration in _apply_physics.
-        for wid, idx in _WHEEL_INDEX.items():
-            travel = float(st.suspensionMaxTravel[idx])
-            if 0.01 <= travel <= 0.5:
-                self._frame.wheels[wid].susp_m_t = travel
+        # AC Evo's static block is session/track metadata only — the AC1
+        # car-spec fields (maxRpm/Power/Torque, suspensionMaxTravel) are
+        # gone. The overlay sources its peaks from graphics (current_bhp,
+        # rpm_percent, max_turbo_boost) and from rolling-max calibration in
+        # physics, so there is nothing to apply here yet. Track name /
+        # ambient temperature could feed future widgets.
+        del st
 
     def _apply_physics(self, ph: _SPageFilePhysics) -> None:
         e = self._frame.engine
@@ -749,3 +747,15 @@ class AcEvoTelemetrySource(TelemetrySource):
         e.abs_in_action = bool(gr.abs_active)
         e.shift_up_hint = bool(gr.is_change_up_rpm)
         e.shift_down_hint = bool(gr.is_change_down_rpm)
+
+        # Tyre compound names — duplicated across all 4 TyreStates, so we
+        # read them once. ctypes c_char arrays come back as null-padded
+        # bytes; strip nulls before decoding.
+        front_raw = bytes(gr.tyre_lf.data.tyre_compound_front).rstrip(b"\x00")
+        rear_raw = bytes(gr.tyre_lf.data.tyre_compound_rear).rstrip(b"\x00")
+        front_compound = front_raw.decode("ascii", errors="ignore").strip()
+        rear_compound = rear_raw.decode("ascii", errors="ignore").strip()
+        self._frame.wheels["FL"].compound = front_compound
+        self._frame.wheels["FR"].compound = front_compound
+        self._frame.wheels["RL"].compound = rear_compound
+        self._frame.wheels["RR"].compound = rear_compound

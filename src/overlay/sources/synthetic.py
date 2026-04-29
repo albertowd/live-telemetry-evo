@@ -24,8 +24,9 @@ class SyntheticTelemetrySource(TelemetrySource):
         self._dt = 1.0 / hz
         self._frame = TelemetryFrame()
         self._frame.engine.max_turbo_boost = 1.2
-        for w in self._frame.wheels.values():
+        for wid, w in self._frame.wheels.items():
             w.susp_m_t = 0.1
+            w.compound = "MEDIUM" if wid[0] == "F" else "HARD"
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -55,8 +56,18 @@ class SyntheticTelemetrySource(TelemetrySource):
         e.gear = 2 + int((t * 0.4) % 5)
         e.abs_level = 1.0
         e.tc_level = 1.0
+        # Aids "engage" when the corresponding stress is high — TC under
+        # heavy throttle, ABS under heavy braking. Lets the overlay show
+        # the dim/bright chip differentiation without a running game.
+        e.tc_in_action = throttle > 0.85
+        e.abs_in_action = brake > 0.55
         # Pit limiter pulses on briefly every ~30 s so the chip is visible.
         e.pit_limiter = (math.sin(t * 0.21) > 0.97)
+        # Shift hints fire near the redline / off-throttle window so the
+        # RPM bar's shift-light colour change is visible in synthetic mode.
+        rpm_ratio = e.rpm / e.max_rpm if e.max_rpm > 0.0 else 0.0
+        e.shift_up_hint = rpm_ratio > 0.93
+        e.shift_down_hint = rpm_ratio < 0.20 and throttle > 0.5
 
         for wid, w in self._frame.wheels.items():
             is_front = wid[0] == "F"

@@ -69,7 +69,15 @@ class EngineView(QWidget):
             ratio = min(1.0, d.rpm_percent)
         else:
             ratio = min(1.0, d.rpm / d.max_rpm) if d.max_rpm > 0.0 else 0.0
-        color = self._power.interpolate_color(d.rpm)
+        # Game-driven shift hints override the power-curve colour: red on
+        # the upshift cue (full bar acts as a shift light), blue on the
+        # downshift cue. Falls back to the power-curve colour otherwise.
+        if d.shift_up_hint:
+            color = Colors.red
+        elif d.shift_down_hint:
+            color = Colors.blue
+        else:
+            color = self._power.interpolate_color(d.rpm)
         rpm_fill = QRectF(RPM_BAR_RECT)
         rpm_fill.setWidth(RPM_BAR_RECT.width() * ratio)
         p.fillRect(rpm_fill, color)
@@ -123,14 +131,20 @@ class EngineView(QWidget):
         p.end()
 
     def _draw_aids(self, p: QPainter, d: EngineData) -> None:
-        """Driver-aid status row: PIT / TC / ABS chips, only when active."""
-        chips: list[tuple[str, QColor]] = []
+        """Driver-aid status row.
+
+        Chip colour brightens when the aid is *currently engaging*
+        (tc_in_action / abs_in_action) and dims to alpha 0.4 when the aid
+        is enabled-but-idle. PIT limiter is binary and always drawn fully
+        bright when on.
+        """
+        chips: list[tuple[str, QColor, bool]] = []
         if d.pit_limiter:
-            chips.append(("PIT", Colors.yellow))
+            chips.append(("PIT", Colors.yellow, True))
         if d.tc_level > 0.0:
-            chips.append(("TC", Colors.green))
+            chips.append(("TC", Colors.green, d.tc_in_action))
         if d.abs_level > 0.0:
-            chips.append(("ABS", Colors.blue))
+            chips.append(("ABS", Colors.blue, d.abs_in_action))
         if not chips:
             return
 
@@ -138,7 +152,10 @@ class EngineView(QWidget):
         total_w = chip_w * len(chips)
         x = (LOGICAL_W - total_w) / 2.0
         p.setFont(label_font(16))
-        for label, color in chips:
+        for label, color, engaging in chips:
+            if not engaging:
+                color = QColor(color)
+                color.setAlphaF(0.4)
             p.setPen(color)
             p.drawText(QRectF(x, AIDS_RECT.y(), chip_w, AIDS_RECT.height()),
                        Qt.AlignCenter, label)

@@ -13,6 +13,7 @@ class WheelData:
     abs_active: bool = False
     brake_t: float = 100.0    # brake disc temperature, C
     camber: float = 0.0       # radians, negative = top-in
+    compound: str = ""        # tyre compound name (e.g. "SOFT")
     height: float = 0.0       # mm, ride height
     lock: bool = False
     susp_t: float = 0.0       # current suspension travel (m)

@@ -289,3 +289,12 @@ class WheelView(QWidget):
             anchor = QRectF(4.0, 4.0, 76.0, 24.0)
             align = Qt.AlignLeft | Qt.AlignVCenter
         p.drawText(anchor, align, self._id)
+
+        # Compound abbreviation below the wheel ID, when known. First three
+        # uppercase chars keep "SOFT" / "MEDIUM" / "HARD" / "INTER" / "WET"
+        # readable while staying out of the load circle's footprint.
+        if self._data.compound:
+            p.setFont(label_font(14))
+            compound_rect = QRectF(anchor.x(), anchor.bottom() + 1.0,
+                                   anchor.width(), 18.0)
+            p.drawText(compound_rect, align, self._data.compound[:3].upper())
