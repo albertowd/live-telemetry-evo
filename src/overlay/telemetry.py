@@ -17,15 +17,23 @@ class WheelData:
     height: float = 0.0       # mm, ride height
     lock: bool = False
     susp_t: float = 0.0       # current suspension travel (m)
-    susp_m_t: float = 0.1     # max suspension travel (m)
+    susp_m_t: float = 0.0     # max observed travel (m); 0 = uncalibrated
     tire_d: float = 0.0       # dirt level 0..4
-    tire_l: float = 0.0       # load (5*kgf units used by the original Load circle)
+    tire_l: float = 0.0       # vertical load, Newtons
     tire_p: float = 26.0      # pressure psi
     tire_p_norm: float = 1.0  # game-reported pressure / ideal-for-compound
     tire_t_c: float = 80.0    # core temperature C
     tire_t_i: float = 80.0    # inner C
     tire_t_m: float = 80.0    # middle C
     tire_t_o: float = 80.0    # outer C
+    # Per-compound normalized temperatures (1.0 = ideal). When the source
+    # publishes them (AC Evo's tyre_normalized_temperature_*) the colour
+    # bands track the compound's real window instead of a fixed 90 C peak.
+    tire_t_norm_c: float = 1.0
+    tire_t_norm_i: float = 1.0
+    tire_t_norm_m: float = 1.0
+    tire_t_norm_o: float = 1.0
+    brake_t_norm: float = 1.0  # brake disc / ideal for current pad+disc
     tire_w: float = 1.0       # wear 0..1 (1 = new)
 
 

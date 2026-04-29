@@ -23,6 +23,10 @@ LOGICAL_W = 512.0
 LOGICAL_H = 271.0
 WARNING_TIME_S = 0.5
 LOCK_BLINK_PERIOD_S = 0.1
+# Tire-load circle: pixels of diameter per Newton. Calibrated so a
+# typical static wheel load (~3000 N) fills the inner half of the
+# 256 px tire silhouette and saturates around ~5200 N.
+LOAD_PX_PER_N = 0.049
 
 
 def _draw_tinted(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
@@ -108,7 +112,9 @@ class WheelView(QWidget):
         # Tire silhouette tinted by composite temperature (mirrors lt_components.Tire).
         body = (d.tire_t_c * 0.75
                 + ((d.tire_t_i + d.tire_t_m + d.tire_t_o) / 3.0) * 0.25)
-        body_color = QColor(self._temp.interpolate_color(body))
+        body_norm = (d.tire_t_norm_c * 0.75
+                     + ((d.tire_t_norm_i + d.tire_t_norm_m + d.tire_t_norm_o) / 3.0) * 0.25)
+        body_color = QColor(self._temp.interpolate_color(body, body_norm))
         _draw_tinted(p, "tire", rect, body_color)
 
         # Temps overlay: 3 columns x 8 rows. Inner/Mid/Outer get the top+bottom
@@ -120,18 +126,18 @@ class WheelView(QWidget):
         outer_x = rect.x() + pad + 2.0 * part
         top_y = rect.y() + pad
 
-        core_color = QColor(self._temp.interpolate_color(d.tire_t_c))
+        core_color = QColor(self._temp.interpolate_color(d.tire_t_c, d.tire_t_norm_c))
         core_color.setAlphaF(0.85)
         p.setPen(Qt.NoPen)
         p.setBrush(core_color)
         p.drawRect(QRectF(inner_x, top_y + quarter, part * 3.0, quarter * 6.0))
 
-        for value, x in (
-            (d.tire_t_i, inner_x),
-            (d.tire_t_m, rect.x() + pad + part),
-            (d.tire_t_o, outer_x),
+        for value, norm, x in (
+            (d.tire_t_i, d.tire_t_norm_i, inner_x),
+            (d.tire_t_m, d.tire_t_norm_m, rect.x() + pad + part),
+            (d.tire_t_o, d.tire_t_norm_o, outer_x),
         ):
-            c = QColor(self._temp.interpolate_color(value))
+            c = QColor(self._temp.interpolate_color(value, norm))
             p.setBrush(c)
             p.drawRect(QRectF(x, top_y, part, quarter))
             p.drawRect(QRectF(x, top_y + quarter * 7.0, part, quarter))
@@ -217,7 +223,7 @@ class WheelView(QWidget):
             self._lock_warn_until = time.monotonic() + WARNING_TIME_S
 
         # Default tint reflects brake disc temperature; ABS/lock override it.
-        temp_color = QColor(self._brake_temp.interpolate_color(d.brake_t))
+        temp_color = QColor(self._brake_temp.interpolate_color(d.brake_t, d.brake_t_norm))
 
         if d.abs_active:
             # ABS modulating on this wheel: blink blue/temp so the moment
@@ -275,7 +281,7 @@ class WheelView(QWidget):
         # The load circle stays centred over the tire and grows with load.
         # Original Box: (128, 0, 256, 256) → centre (256, 128).
         center = QPointF(256.0, 128.0)
-        diameter = max(40.0, min(256.0, d.tire_l * 2.4))
+        diameter = max(40.0, min(256.0, d.tire_l * LOAD_PX_PER_N))
         rect = QRectF(center.x() - diameter / 2.0,
                       center.y() - diameter / 2.0,
                       diameter, diameter)
@@ -284,14 +290,17 @@ class WheelView(QWidget):
         _draw_tinted(p, "load", rect, c)
 
     def _draw_label(self, p: QPainter) -> None:
+        # Match the ride-height label's horizontal extent so the wheel ID
+        # / compound sit in the same vertical column as the height value.
+        # The height text uses rect.x()-20, width+40 with AlignCenter
+        # (see _draw_height); mirror that here.
+        col_x = self._x_left(430.0, 64.0) - 20.0
+        col_w = 64.0 + 40.0
+        anchor = QRectF(col_x, 4.0, col_w, 24.0)
+        align = Qt.AlignCenter
+
         p.setFont(label_font(20))
         p.setPen(Colors.white)
-        if self._is_left:
-            anchor = QRectF(LOGICAL_W - 80.0, 4.0, 76.0, 24.0)
-            align = Qt.AlignRight | Qt.AlignVCenter
-        else:
-            anchor = QRectF(4.0, 4.0, 76.0, 24.0)
-            align = Qt.AlignLeft | Qt.AlignVCenter
         p.drawText(anchor, align, self._id)
 
         # Compound abbreviation below the wheel ID, when known. First three

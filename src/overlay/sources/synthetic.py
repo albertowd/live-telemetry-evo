@@ -5,6 +5,8 @@ import random
 
 from PySide6.QtCore import QObject, QTimer
 
+from ..interpolation import (Curve, DEFAULT_BRAKE_TEMP_CURVE,
+                              DEFAULT_TIRE_TEMP_CURVE)
 from ..telemetry import TelemetryFrame
 from .base import TelemetrySource
 
@@ -27,6 +29,12 @@ class SyntheticTelemetrySource(TelemetrySource):
         for wid, w in self._frame.wheels.items():
             w.susp_m_t = 0.1
             w.compound = "MEDIUM" if wid[0] == "F" else "HARD"
+        # Synthetic stand-ins for the game's per-compound normalized
+        # temperatures. Driving the mock fields off the same curves the
+        # widget used to use keeps the mock view colour-bands matching
+        # what the real source produces.
+        self._tire_curve = Curve(DEFAULT_TIRE_TEMP_CURVE)
+        self._brake_curve = Curve(DEFAULT_BRAKE_TEMP_CURVE)
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -73,15 +81,17 @@ class SyntheticTelemetrySource(TelemetrySource):
             is_front = wid[0] == "F"
             is_left = wid[1] == "L"
 
-            load_base = 50.0
-            brake_bias = 30.0 * brake * (1.0 if is_front else 0.4)
-            corner_bias = 25.0 * (cornering if not is_left else -cornering)
+            # Synthetic loads in Newtons — typical static corner load ~2500 N,
+            # peaking near 5000 N under combined braking + cornering.
+            load_base = 2500.0
+            brake_bias = 1500.0 * brake * (1.0 if is_front else 0.4)
+            corner_bias = 1250.0 * (cornering if not is_left else -cornering)
             corner_bias = max(0.0, corner_bias)
-            w.tire_l = load_base + brake_bias + corner_bias + random.uniform(-2.0, 2.0)
+            w.tire_l = load_base + brake_bias + corner_bias + random.uniform(-100.0, 100.0)
 
-            w.susp_t = min(w.susp_m_t, max(0.005, (w.tire_l / 200.0) * w.susp_m_t))
+            w.susp_t = min(w.susp_m_t, max(0.005, (w.tire_l / 10000.0) * w.susp_m_t))
 
-            w.height = 30.0 - (w.tire_l - 50.0) * 0.05 + math.sin(t * 3.1 + (0 if is_front else 1.0)) * 1.5
+            w.height = 30.0 - (w.tire_l - 2500.0) * 0.001 + math.sin(t * 3.1 + (0 if is_front else 1.0)) * 1.5
 
             w.camber = -0.03 + (corner_bias * 0.0008 if not is_left else -corner_bias * 0.0008)
 
@@ -100,6 +110,10 @@ class SyntheticTelemetrySource(TelemetrySource):
             w.tire_t_i = w.tire_t_c + (skew if is_left else -skew) + random.uniform(-1.0, 1.0)
             w.tire_t_m = w.tire_t_c + random.uniform(-1.0, 1.0)
             w.tire_t_o = w.tire_t_c + (-skew if is_left else skew) + random.uniform(-1.0, 1.0)
+            w.tire_t_norm_c = self._tire_curve.interpolate(w.tire_t_c)
+            w.tire_t_norm_i = self._tire_curve.interpolate(w.tire_t_i)
+            w.tire_t_norm_m = self._tire_curve.interpolate(w.tire_t_m)
+            w.tire_t_norm_o = self._tire_curve.interpolate(w.tire_t_o)
 
             w.tire_d = min(4.0, w.tire_d + self._dt * 0.02)
             if random.random() < 0.0005:
@@ -111,6 +125,7 @@ class SyntheticTelemetrySource(TelemetrySource):
             brake_cool = 0.4
             w.brake_t += (brake_heat_in - brake_cool) * self._dt * 30.0
             w.brake_t = max(50.0, min(900.0, w.brake_t))
+            w.brake_t_norm = self._brake_curve.interpolate(w.brake_t)
 
             hard_brake = brake > 0.35
             slip_mock = brake > 0.5 and random.random() < 0.05

@@ -79,26 +79,43 @@ class Power(Curve):
 
 class TirePsi:
     """Pressure colour bands around the game-reported normalized pressure
-    (1.0 = ideal cold pressure for the current compound)."""
+    (1.0 = ideal cold pressure for the current compound).
+
+    AC Evo holds norm at 1.0 across a wide window and only moves it once
+    pressure runs well over the compound's ideal — so by the time norm
+    leaves 1.0 the tyre is already out of spec. Bands sit tight (±0.02
+    green, 0.01 lerp) so any move off 1.0 turns the icon decisively
+    rather than fading in slowly."""
+
+    GREEN_HALF_WIDTH = 0.02
+    LERP_HALF_WIDTH = 0.01
 
     def interpolate_color(self, norm: float) -> QColor:
-        if norm < 0.95:
+        delta = norm - 1.0
+        if abs(delta) <= self.GREEN_HALF_WIDTH:
+            return Colors.green
+        edge = self.GREEN_HALF_WIDTH + self.LERP_HALF_WIDTH
+        if delta < -edge:
             return Colors.blue
-        if norm < 1.00:
-            return lerp_color(Colors.blue, Colors.green, (norm - 0.95) / 0.05)
-        if norm < 1.05:
-            return lerp_color(Colors.green, Colors.red, (norm - 1.00) / 0.05)
-        return Colors.red
+        if delta > edge:
+            return Colors.red
+        t = (abs(delta) - self.GREEN_HALF_WIDTH) / self.LERP_HALF_WIDTH
+        return lerp_color(Colors.green, Colors.blue if delta < 0 else Colors.red, t)
 
 
 class TireTemp(Curve):
-    """Tire temperature curve, returns a 0..1 grip-ish band, with cold/hot colors."""
+    """Tire/brake temperature curve. Returns a 0..1 grip-ish band with
+    cold/hot colours. When ``norm`` is supplied (the game's per-compound
+    normalized temp, 1.0 = ideal) it is used directly for the band
+    saturation; otherwise the band is read off the embedded curve. The
+    cold-vs-hot side is still picked from the raw temp against the curve's
+    peak — slightly off for compounds whose ideal sits far from the
+    curve's reference, but correct for the common case."""
 
-    def interpolate_color(self, temp: float) -> QColor:
+    def interpolate_color(self, temp: float, norm: float | None = None) -> QColor:
         if not self._curve:
             return Colors.white
-        interp = self.interpolate(temp)
-        # interp is on the original lut scale; bands match the AC plugin.
+        interp = norm if norm is not None else self.interpolate(temp)
         if temp < self._max[0]:
             return lerp_color(Colors.blue, Colors.green, max(0.0, interp - 0.98) / 0.02)
         return lerp_color(Colors.red, Colors.green, max(0.0, interp - 0.98) / 0.02)

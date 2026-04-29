@@ -679,23 +679,30 @@ class AcEvoTelemetrySource(TelemetrySource):
 
             w.camber = float(ph.camberRAD[idx])
             w.susp_t = float(ph.suspensionTravel[idx])
-            # Rolling-max calibration with a 5 % headroom: AC Evo no longer
-            # publishes the per-car max travel in static, so we infer it
-            # from the observed peak compression. Converges within a few
-            # hard corners and keeps the colour thresholds (>0.95 / <0.05)
-            # meaningful regardless of car class.
-            if w.susp_t * 1.05 > w.susp_m_t:
-                w.susp_m_t = w.susp_t * 1.05
+            # AC Evo no longer publishes the per-car suspensionMaxTravel,
+            # so we calibrate susp_m_t from observation. Cars span a wide
+            # range (~0.04 m on a GT3 to >0.15 m on a road car), so the
+            # field starts at 0 (uncalibrated): the first non-zero sample
+            # seeds it with 100 % headroom, and subsequent harder
+            # compressions tighten with a 5 % headroom.
+            if w.susp_m_t > 0.0:
+                if w.susp_t * 1.05 > w.susp_m_t:
+                    w.susp_m_t = w.susp_t * 1.05
+            elif w.susp_t > 0.0:
+                w.susp_m_t = w.susp_t * 2.0
 
-            # Ride height: AC1 reports per-axle in metres (rideHeight[0]
-            # front, [1] rear). Convert to mm.
+            # Ride height per axle (rideHeight[0]=front, [1]=rear).
+            # AC1 reported metres and so do most AC Evo cars (≈0.05 race,
+            # ≈0.15 road), but some chassis publish mm directly — auto-
+            # detect by magnitude so the readout doesn't blow up to ×1000
+            # on those cars. 1.0 m is well above any plausible ride
+            # height, so it's a clean threshold.
             axle = idx // 2
-            w.height = float(ph.rideHeight[axle]) * 1000.0
+            raw = float(ph.rideHeight[axle])
+            w.height = raw if abs(raw) >= 1.0 else raw * 1000.0
 
             w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
-            # AC1 wheelLoad is Newtons; the original Load circle code divides
-            # by (5 * g) to get the "5*kgf" pseudo-unit it expected.
-            w.tire_l = float(ph.wheelLoad[idx]) / (5.0 * 9.80665)
+            w.tire_l = float(ph.wheelLoad[idx])  # Newtons
             w.tire_p = float(ph.wheelsPressure[idx])
             w.tire_t_c = float(ph.tyreCoreTemperature[idx])
             w.tire_t_i = float(ph.tyreTempI[idx])
@@ -736,19 +743,36 @@ class AcEvoTelemetrySource(TelemetrySource):
         e.shift_up_hint = bool(gr.is_change_up_rpm)
         e.shift_down_hint = bool(gr.is_change_down_rpm)
 
-        # Per-wheel lock flag — the game's own determination, replaces the
-        # speed/slip/angular-speed heuristic and avoids the standstill
-        # false positives the heuristic had to special-case.
-        # tyre_normalized_pressure is the game's own ratio against the
-        # compound's ideal cold pressure (1.0 = on target). Using it lets
-        # the colour bands track per-compound targets instead of a hard-
-        # coded 26 psi that goes red on most race rubber.
+        # Per-wheel data published as embedded TyreState blocks:
+        #   * lock — game-supplied, replaces the slip/angular-speed
+        #     heuristic and its standstill false positives.
+        #   * tyre_normalized_pressure / temperature_* — ratios against the
+        #     compound's ideal (1.0 = on target). Lets colour bands track
+        #     per-compound targets instead of hard-coded reference points.
+        # The tyre's "left/right" axis is the contact-patch face viewed from
+        # outside the car: LEFT wheel → left=outer, right=inner; RIGHT
+        # wheel mirrored.
         for wid, ts in (("FL", gr.tyre_lf), ("FR", gr.tyre_rf),
                         ("RL", gr.tyre_lr), ("RR", gr.tyre_rr)):
             w = self._frame.wheels[wid]
             w.lock = bool(ts.data.lock)
             if ts.data.tyre_normalized_pressure > 0.0:
                 w.tire_p_norm = float(ts.data.tyre_normalized_pressure)
+            if ts.data.tyre_normalized_temperature_core > 0.0:
+                w.tire_t_norm_c = float(ts.data.tyre_normalized_temperature_core)
+            if ts.data.tyre_normalized_temperature_center > 0.0:
+                w.tire_t_norm_m = float(ts.data.tyre_normalized_temperature_center)
+            is_left = wid[1] == "L"
+            inner_norm = (ts.data.tyre_normalized_temperature_right if is_left
+                          else ts.data.tyre_normalized_temperature_left)
+            outer_norm = (ts.data.tyre_normalized_temperature_left if is_left
+                          else ts.data.tyre_normalized_temperature_right)
+            if inner_norm > 0.0:
+                w.tire_t_norm_i = float(inner_norm)
+            if outer_norm > 0.0:
+                w.tire_t_norm_o = float(outer_norm)
+            if ts.data.brake_normalized_temperature > 0.0:
+                w.brake_t_norm = float(ts.data.brake_normalized_temperature)
 
         # Tyre compound names — duplicated across all 4 TyreStates, so we
         # read them once. ctypes c_char arrays come back as null-padded

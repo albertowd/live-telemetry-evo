@@ -122,6 +122,8 @@ def _print_parsed(reader: AcEvoSharedMemoryReader, segment: str) -> None:
         print(f"  tyreDirtyLevel {tuple(ph.tyreDirtyLevel)}")
         print(f"  brakeTemp      {tuple(ph.brakeTemp)}")
         print(f"  rideHeight     {tuple(ph.rideHeight)}")
+        print(f"  suspTravel     {tuple(ph.suspensionTravel)}")
+        print(f"  suspDamage     {tuple(ph.suspensionDamage)}")
         print(f"  tc             {ph.tc:.3f}")
         print(f"  pitLimiterOn   {ph.pitLimiterOn}")
     elif segment == "static":
@@ -140,6 +142,20 @@ def _print_parsed(reader: AcEvoSharedMemoryReader, segment: str) -> None:
         print(f"  track                {st.track!r}")
         print(f"  track_configuration  {st.track_configuration!r}")
         print(f"  track_length_m       {st.track_length_m:.1f}")
+    elif segment == "graphics":
+        gr = reader.read_graphics()
+        print("[graphics] per-wheel tyre states (raw vs game-normalized):")
+        print(f"  {'wheel':5}  {'psi':>6}  {'norm_p':>7}  "
+              f"{'t_c':>6}  {'norm_t':>7}  {'brake_c':>8}  {'norm_b':>7}  compound(F/R)")
+        for label, ts in (("FL", gr.tyre_lf), ("FR", gr.tyre_rf),
+                          ("RL", gr.tyre_lr), ("RR", gr.tyre_rr)):
+            d = ts.data
+            cf = bytes(d.tyre_compound_front).rstrip(b"\x00").decode("ascii", errors="ignore")
+            cr = bytes(d.tyre_compound_rear).rstrip(b"\x00").decode("ascii", errors="ignore")
+            print(f"  {label:5}  {d.tyre_pressure:6.2f}  {d.tyre_normalized_pressure:7.3f}  "
+                  f"{d.tyre_temperature_c:6.1f}  {d.tyre_normalized_temperature_core:7.3f}  "
+                  f"{d.brake_temperature_c:8.0f}  {d.brake_normalized_temperature:7.3f}  "
+                  f"{cf}/{cr}")
     else:
         print(f"[{segment}] parsed view not implemented yet — use --bytes for a hex dump")
 
