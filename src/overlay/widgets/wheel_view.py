@@ -175,8 +175,11 @@ class WheelView(QWidget):
         # Tinted suspension graphic.
         _draw_tinted(p, "suspension", rect, band)
 
-        # Inner travel fill — original AC plugin: 10x44 padding and a
-        # downward-growing bar based on (1 - travel).
+        # Inner travel fill — original AC plugin convention: bar fills the
+        # inner area at full extension and SHRINKS as the suspension
+        # compresses (height proportional to remaining travel, 1 - ratio).
+        # Counter-intuitive vs a typical "load grows" gauge but kept for
+        # parity with LiveTelemetry. 10x44 padding inside the icon graphic.
         inner = QRectF(rect.x() + 10.0, rect.y() + 44.0,
                        rect.width() - 20.0, rect.height() - 88.0)
         fill_h = inner.height() * max(0.0, min(1.0, 1.0 - travel))
@@ -191,13 +194,16 @@ class WheelView(QWidget):
         p.setBrush(Colors.black)
         p.drawRect(rect)
 
-        if d.tire_w > 0.98:
+        # Display the 0.85..1.00 range — AC Evo reports wear on a small
+        # scale (1.0 = fresh, ~0.85 = significantly worn), so a narrower
+        # band would leave the bar pinned at full all session.
+        if d.tire_w > 0.95:
             color = Colors.green
-        elif d.tire_w > 0.96:
+        elif d.tire_w > 0.90:
             color = Colors.yellow
         else:
             color = Colors.red
-        wear = max(0.0, min(1.0, (d.tire_w - 0.94) / 0.06))
+        wear = max(0.0, min(1.0, (d.tire_w - 0.85) / 0.15))
         fill_h = wear * rect.height()
         fill = QRectF(rect.x(), rect.bottom() - fill_h, rect.width(), fill_h)
         p.setPen(Qt.NoPen)
@@ -225,6 +231,15 @@ class WheelView(QWidget):
             self._lock_blink_t = 0.0
 
         _draw_tinted(p, "brake", rect, color)
+
+        # Disc temperature label below the icon, always in the temp-tint
+        # color so the value stays legible even when ABS/lock force the
+        # icon blue/yellow.
+        p.setFont(label_font(18))
+        p.setPen(temp_color)
+        label_rect = QRectF(rect.x() - 20.0, rect.bottom() + 2.0,
+                            rect.width() + 40.0, 22.0)
+        p.drawText(label_rect, Qt.AlignCenter, f"{int(d.brake_t)} °C")
 
     def _draw_pressure(self, p: QPainter, d: WheelData) -> None:
         rect = QRectF(self._x_left(70.0, 60.0), 171.0, 60.0, 60.0)

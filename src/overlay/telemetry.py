@@ -43,6 +43,16 @@ class EngineData:
     abs_level: float = 0.0     # > 0 = ABS aid enabled
     tc_level: float = 0.0      # > 0 = traction control enabled
     pit_limiter: bool = False
+    # Live values from AC Evo's graphics block (negative = unknown / not
+    # available — the overlay should fall back to the synthesized power
+    # curve and rpm/max_rpm ratio when these aren't filled).
+    current_bhp: float = -1.0
+    current_torque: float = -1.0
+    rpm_percent: float = -1.0  # 0..1 fraction of redline, when known
+    tc_in_action: bool = False
+    abs_in_action: bool = False
+    shift_up_hint: bool = False
+    shift_down_hint: bool = False
 
 
 @dataclass

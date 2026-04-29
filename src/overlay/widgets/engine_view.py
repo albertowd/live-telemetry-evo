@@ -61,17 +61,27 @@ class EngineView(QWidget):
 
         d = self._data
 
-        # RPM/power bar background.
+        # RPM/power bar background. Prefer the game-supplied rpm_percent
+        # (exact fraction of redline) over rpm/max_rpm — works even when the
+        # absolute redline is unknown.
         p.fillRect(RPM_BAR_RECT, Colors.black)
-        ratio = min(1.0, d.rpm / d.max_rpm) if d.max_rpm > 0.0 else 0.0
+        if d.rpm_percent >= 0.0:
+            ratio = min(1.0, d.rpm_percent)
+        else:
+            ratio = min(1.0, d.rpm / d.max_rpm) if d.max_rpm > 0.0 else 0.0
         color = self._power.interpolate_color(d.rpm)
         rpm_fill = QRectF(RPM_BAR_RECT)
         rpm_fill.setWidth(RPM_BAR_RECT.width() * ratio)
         p.fillRect(rpm_fill, color)
 
-        # HP / gear+speed / RPM labels under the bar.
-        torque_at_rpm_hp = self._power.interpolate(d.rpm)
-        hp = int(torque_at_rpm_hp * (1.0 + d.turbo_boost))
+        # HP / gear+speed / RPM labels under the bar. Prefer live current_bhp
+        # from AC Evo's graphics block over the synthesized curve when
+        # available — exact engine output, no (1+boost) hack needed.
+        if d.current_bhp >= 0.0:
+            hp = int(d.current_bhp)
+        else:
+            torque_at_rpm_hp = self._power.interpolate(d.rpm)
+            hp = int(torque_at_rpm_hp * (1.0 + d.turbo_boost))
         p.setFont(label_font(20))
         p.setPen(color)
 
