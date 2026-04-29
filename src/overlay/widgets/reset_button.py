@@ -17,6 +17,8 @@ class ResetButton(DraggableWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent, closable=False)
+        # Initial size; the size-cycle handler in app.py rescales us via
+        # setFixedSize(...) when the user changes the size factor.
         self.setFixedSize(36, 36)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setCursor(Qt.PointingHandCursor)

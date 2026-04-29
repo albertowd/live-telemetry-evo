@@ -38,7 +38,6 @@ class EngineView(DraggableWidget):
         super().__init__(parent)
         self._data = EngineData()
         self._power = Power.from_torque_curve(DEFAULT_TORQUE_CURVE)
-        self.setMinimumSize(384, 64)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def set_data(self, data: EngineData) -> None:

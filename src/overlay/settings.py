@@ -112,3 +112,17 @@ def delete_entries(widget_ids: list[str]) -> None:
             changed = True
     if changed:
         _write(data)
+
+
+def load_size_index(default: int, count: int) -> int:
+    """Return the persisted size-cycle index, clamped to ``[0, count)``."""
+    val = _read().get("size_index")
+    if isinstance(val, int) and 0 <= val < count:
+        return val
+    return default
+
+
+def save_size_index(idx: int) -> None:
+    data = _read()
+    data["size_index"] = int(idx)
+    _write(data)

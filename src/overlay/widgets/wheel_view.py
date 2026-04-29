@@ -60,7 +60,6 @@ class WheelView(DraggableWidget):
         self._lock_warn_until = 0.0
         self._lock_blink_t = 0.0
         self._last_paint = time.monotonic()
-        self.setMinimumSize(384, 200)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     @property
@@ -274,8 +273,11 @@ class WheelView(DraggableWidget):
 
         p.setFont(label_font(16))
         p.setPen(color)
-        text_rect = QRectF(rect.x() - 20.0, rect.y(),
-                           rect.width() + 40.0, rect.height())
+        # Clamp the ±20 px expansion to widget bounds so the centred text
+        # never overflows the logical 0..LOGICAL_W rect.
+        text_x = max(0.0, rect.x() - 20.0)
+        text_right = min(LOGICAL_W, rect.x() + rect.width() + 20.0)
+        text_rect = QRectF(text_x, rect.y(), text_right - text_x, rect.height())
         p.drawText(text_rect, Qt.AlignCenter, f"{d.height:.1f} mm")
 
     def _draw_load(self, p: QPainter, d: WheelData) -> None:
@@ -293,11 +295,13 @@ class WheelView(DraggableWidget):
     def _draw_label(self, p: QPainter) -> None:
         # Match the ride-height label's horizontal extent so the wheel ID
         # / compound sit in the same vertical column as the height value.
-        # The height text uses rect.x()-20, width+40 with AlignCenter
-        # (see _draw_height); mirror that here.
-        col_x = self._x_left(430.0, 64.0) - 20.0
-        col_w = 64.0 + 40.0
-        anchor = QRectF(col_x, 4.0, col_w, 24.0)
+        # Same widget-bounds clamp so the column never overflows logical
+        # 0..LOGICAL_W (the height-icon rect can sit flush with the edge
+        # on the inboard wheels).
+        rect_x = self._x_left(430.0, 64.0)
+        col_x = max(0.0, rect_x - 20.0)
+        col_right = min(LOGICAL_W, rect_x + 64.0 + 20.0)
+        anchor = QRectF(col_x, 4.0, col_right - col_x, 24.0)
         align = Qt.AlignCenter
 
         p.setFont(label_font(20))

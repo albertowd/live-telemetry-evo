@@ -58,14 +58,20 @@ class ScreenLayout:
     wheels: dict[str, WidgetPlacement]
 
 
-def compute_layout(screen_w: int, screen_h: int) -> ScreenLayout:
+def compute_layout(screen_w: int, screen_h: int,
+                   *, multiplier: float | None = None) -> ScreenLayout:
     """Lay out widgets on a screen-sized overlay.
 
     Engine bar sits top-centre. Wheel widgets occupy the four corners
     (FL top-left, FR top-right, RL bottom-left, RR bottom-right) at the
-    multiplier picked from the screen's vertical resolution.
+    multiplier picked from the screen's vertical resolution. Pass an
+    explicit ``multiplier`` to override the resolution-based pick — used
+    by the in-overlay size-cycle button.
     """
-    name, mult = pick_resolution(screen_h)
+    if multiplier is None:
+        name, mult = pick_resolution(screen_h)
+    else:
+        name, mult = "custom", float(multiplier)
 
     eng_w = int(ENGINE_LOGICAL_W * mult)
     eng_h = int(ENGINE_LOGICAL_H * mult)
@@ -73,11 +79,13 @@ def compute_layout(screen_w: int, screen_h: int) -> ScreenLayout:
     wheel_h = int(WHEEL_LOGICAL_H * mult)
     margin = max(8, int(20 * mult))
 
-    # Down-scale uniformly if the chosen multiplier exceeds the screen
-    # (e.g. someone running an FHD display in portrait): each side needs
-    # one wheel widget plus margin, the centre needs the engine widget.
+    # Down-scale uniformly if the chosen multiplier exceeds the screen.
+    # Each side needs one wheel widget, top + bottom each need wheel
+    # height. Engine sits horizontally between the rear wheels at the
+    # bottom so it doesn't add to the height demand on screens where
+    # eng_h < wheel_h.
     side_demand = wheel_w + margin
-    top_demand = eng_h + margin * 2 + wheel_h
+    top_demand = wheel_h + margin
     bottom_demand = wheel_h + margin
     width_needed = side_demand * 2 + eng_w + margin * 2
     height_needed = top_demand + bottom_demand
@@ -90,14 +98,20 @@ def compute_layout(screen_w: int, screen_h: int) -> ScreenLayout:
         wheel_h = int(wheel_h * scale)
         margin = max(4, int(margin * scale))
 
+    # Engine bar sits in the bottom fifth of the screen, centered
+    # horizontally so it fills the gap between the two rear wheels.
+    # Falls back to "stuck against the bottom margin" on the rare case
+    # the screen is short enough that 4/5 would push the bar off-screen.
+    engine_y = min(screen_h * 4 // 5, screen_h - eng_h - margin)
+
     engine = WidgetPlacement(
         x=(screen_w - eng_w) // 2,
-        y=margin,
+        y=engine_y,
         w=eng_w,
         h=eng_h,
     )
 
-    top_y = margin + eng_h + margin
+    top_y = margin
     bot_y = screen_h - wheel_h - margin
     left_x = margin
     right_x = screen_w - wheel_w - margin
