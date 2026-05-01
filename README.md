@@ -358,3 +358,14 @@ the live AC Evo reader (or any future source) does not touch any UI code.
 - **Click-through default is ON.** This is deliberate — a full-screen overlay must
   not steal mouse input from the game. Toggle it off with `Ctrl+Alt+L` before trying
   to drag a widget.
+
+---
+
+## Acknowledgements
+
+This project was kicked off by Kunos's official AC Evo shared-memory guide on
+Steam:
+[**Assetto Corsa EVO — Shared Memory documentation**](https://steamcommunity.com/sharedfiles/filedetails/?id=3707421508).
+The struct layouts in `src/overlay/sources/ac_evo.py` are transcribed straight
+from that guide — every field name and offset there comes from this thread. If
+you want to extend the overlay with new fields, that's the canonical reference.
