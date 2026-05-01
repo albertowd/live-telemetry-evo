@@ -12,6 +12,11 @@ ENGINE_LOGICAL_W = 512
 ENGINE_LOGICAL_H = 148
 WHEEL_LOGICAL_W = 512
 WHEEL_LOGICAL_H = 271
+# Phase 3 inputs widget — pedals + steering + FFB + G-meter + damage /
+# tyres-out / performance mode. Keep in sync with the constants in
+# ``widgets/inputs_view.py``.
+INPUTS_LOGICAL_W = 480
+INPUTS_LOGICAL_H = 160
 
 # Resolution -> multiplier table from lt_components.BoxComponent.resolution_map.
 # We pick the row whose nominal vertical resolution best matches the actual
@@ -51,7 +56,7 @@ class WidgetPlacement:
 
 @dataclass(frozen=True)
 class ScreenLayout:
-    """Computed positions for engine + 4 wheel widgets on a full-screen overlay."""
+    """Computed positions for engine + 4 wheel widgets + inputs widget."""
 
     multiplier: float
     resolution_name: str
@@ -59,6 +64,7 @@ class ScreenLayout:
     screen_h: int
     margin: int
     engine: WidgetPlacement
+    inputs: WidgetPlacement
     wheels: dict[str, WidgetPlacement]
 
 
@@ -79,6 +85,8 @@ def compute_layout(screen_w: int, screen_h: int,
 
     eng_w = int(ENGINE_LOGICAL_W * mult)
     eng_h = int(ENGINE_LOGICAL_H * mult)
+    in_w = int(INPUTS_LOGICAL_W * mult)
+    in_h = int(INPUTS_LOGICAL_H * mult)
     wheel_w = int(WHEEL_LOGICAL_W * mult)
     wheel_h = int(WHEEL_LOGICAL_H * mult)
     margin = max(8, int(20 * mult))
@@ -98,6 +106,8 @@ def compute_layout(screen_w: int, screen_h: int,
         scale = min(screen_w / width_needed, screen_h / height_needed) * 0.95
         eng_w = int(eng_w * scale)
         eng_h = int(eng_h * scale)
+        in_w = int(in_w * scale)
+        in_h = int(in_h * scale)
         wheel_w = int(wheel_w * scale)
         wheel_h = int(wheel_h * scale)
         margin = max(4, int(margin * scale))
@@ -113,6 +123,16 @@ def compute_layout(screen_w: int, screen_h: int,
         y=engine_y,
         w=eng_w,
         h=eng_h,
+    )
+
+    # Inputs widget mirrors the engine bar's anchor, but at the top of
+    # the screen — sits between the front wheel widgets in the same way
+    # the engine sits between the rear wheels.
+    inputs = WidgetPlacement(
+        x=(screen_w - in_w) // 2,
+        y=margin,
+        w=in_w,
+        h=in_h,
     )
 
     top_y = margin
@@ -134,5 +154,6 @@ def compute_layout(screen_w: int, screen_h: int,
         screen_h=screen_h,
         margin=margin,
         engine=engine,
+        inputs=inputs,
         wheels=wheels,
     )

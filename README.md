@@ -1,5 +1,7 @@
 # AC Evo Telemetry Overlay
 
+![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/preview.webp)
+
 Transparent, always-on-top desktop overlay that displays live engine and per-wheel
 telemetry on top of **Assetto Corsa Evo** (or any other window). Built with **PySide6**
 and ported from the original AC1 *LiveTelemetry* plugin.
@@ -144,7 +146,31 @@ Icon-name mapping:
 | INV | `flag-remove` | | |
 | LAST | `flag-checkered` | | |
 
-### Wheel widget (one per corner; FL/FR/RL/RR)
+### Inputs widget (top-centred, between the front wheels)
+
+Phase 3 widget: driver inputs + dynamics + car state. Sits at the top of
+the screen, mirroring the engine bar's bottom-centre slot.
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ THR ▓▓▓▓▓▓▓▓▓▓░  85%                       ┌─────────┐             │
+│ BRK ░░░░░░░░░░░   0%                       │   ⊕ ●   │  G-meter    │
+│ CLU ░░░░░░░░░░░   0%                       │  rings  │             │
+│ HBR ░░░░░░░░░░░   0%                       └─────────┘             │
+│ STR ───•─────── -162°                          1.61 g              │
+│ FFB ▓▓▓▓▓▓▓▓▓▓▓  97%      DMG  F R L I C   OUT 2  MODE QUAL        │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+| Element        | What it shows                                                                |
+| -------------- | ---------------------------------------------------------------------------- |
+| THR / BRK / CLU / HBR | Pedal % as horizontal bars (green / red / yellow / white).            |
+| STR            | Steering input as a signed bar from the centre (left = blue fill leftward, right = blue fill rightward); numeric readout in degrees. |
+| FFB            | Force-feedback strength 0..1; turns red at ≥ 95 % to flag clipping.          |
+| G-meter        | Circle with 0.5 g + 1.0 g reference rings. Dot at `(g_lat, -g_long)` scaled to a 1.7 g rim. **Green** below 1 g combined, **yellow** 1–1.5 g, **red** above. The combined-g magnitude is shown numerically below the meter. |
+| DMG chips      | Five zones (F = front, R = rear, L = left, I = right, C = centre). Dim outline below 5 %, **yellow** to ~25 %, **red** above. The whole row is hidden when the car is undamaged. |
+| OUT chip       | Number of tyres currently off-track (0 hides the chip).                      |
+| MODE label     | Performance-mode preset (e.g. `WET`, `QUAL`); hidden when empty.             |
 
 Right-side wheels are mirrored so the *outer* edge always faces the screen edge. The
 icons are tinted PNGs cached as alpha masks and re-coloured every frame.
@@ -204,6 +230,11 @@ Phase 1 chips (booleans): `esc_active`, `launch_active`, `drs_available`,
 Phase 2 readouts (zero = not published, hidden): `water_temp_c`, `oil_temp_c`,
 `oil_pressure_bar`, `fuel_pressure_bar`, `exhaust_temp_c`, `battery_voltage`,
 `fuel_liters`, `brake_bias` (0..1, fraction toward the front axle).
+
+**Inputs** (Phase 3) — `throttle`, `brake`, `clutch`, `handbrake` (0..1);
+`steering` (-1..1), `steering_deg` (signed degrees), `ffb` (0..1, 1.0 = clipping);
+`g_lat`, `g_long`, `g_vert` (g); `damage` (5-tuple, 0..1 per body zone); `tyres_out`
+(0..4); `performance_mode` (string).
 
 **Wheel (×4)** — `tire_t_c`/`tire_t_i`/`tire_t_m`/`tire_t_o` (core / inner / middle /
 outer °C) plus matching per-compound `tire_t_norm_*` (1.0 = ideal), `tire_p` (psi) +
@@ -307,7 +338,8 @@ src/overlay/
 └── widgets/
     ├── countdown.py           # full-screen 5 s countdown shown at startup
     ├── draggable.py           # base widget — drag, click, close button
-    ├── engine_view.py         # boost bar + RPM/power bar + HP/RPM labels + aid chips
+    ├── engine_view.py         # boost bar + RPM/power bar + HP/RPM labels + aid chips + analog readouts
+    ├── inputs_view.py         # pedals + steering + FFB + G-meter + damage / tyres-out / mode
     └── wheel_view.py          # tire, temps, pressure, suspension, wear, camber, height, dirt, lock, load
 ```
 

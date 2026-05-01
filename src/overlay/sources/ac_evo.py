@@ -35,6 +35,7 @@ the only place that needs adjusting.
 from __future__ import annotations
 
 import ctypes
+import math
 import sys
 from ctypes import (c_bool, c_byte, c_char, c_float, c_int8, c_int16, c_int32,
                     c_uint8, c_uint16, c_uint32, c_uint64, c_wchar)
@@ -666,6 +667,29 @@ class AcEvoTelemetrySource(TelemetrySource):
         # what the driver is actually doing.
         e.drs_enabled = bool(ph.drsEnabled) or float(ph.drs) > 0.5
 
+        # Phase 3 — driver inputs / dynamics / car state. Pedals come in
+        # as 0..1 from physics; the graphics block also publishes _percent
+        # variants but physics fires every tick so we prefer it here.
+        i = self._frame.inputs
+        i.throttle = max(0.0, min(1.0, float(ph.gas)))
+        i.brake = max(0.0, min(1.0, float(ph.brake)))
+        i.clutch = max(0.0, min(1.0, float(ph.clutch)))
+        # ph.steerAngle is radians, signed. Convert to a -1..1 input ratio
+        # by clipping at ±π/4 (typical lock-to-lock range divided across
+        # the steering ratio). steering_deg keeps the raw degree value
+        # for the numeric readout.
+        i.steering = max(-1.0, min(1.0, float(ph.steerAngle) / (math.pi / 4)))
+        i.steering_deg = math.degrees(float(ph.steerAngle))
+        i.ffb = max(0.0, min(1.0, abs(float(ph.finalFF))))
+        # AC Evo's accG[0]=lateral, [1]=vertical, [2]=longitudinal —
+        # match the graphics-block ``g_forces_x/y/z`` ordering when we
+        # populate from there in _apply_graphics.
+        i.g_lat = float(ph.accG[0])
+        i.g_vert = float(ph.accG[1])
+        i.g_long = float(ph.accG[2])
+        i.damage = tuple(float(ph.carDamage[k]) for k in range(5))
+        i.tyres_out = int(ph.numberOfTyresOut)
+
         braking = ph.brake > 0.0
         abs_modulating = ph.absInAction != 0
 
@@ -767,6 +791,13 @@ class AcEvoTelemetrySource(TelemetrySource):
         e.exhaust_temp_c = float(gr.exhaust_temperature_c)
         e.battery_voltage = float(gr.battery_voltage)
         e.fuel_liters = float(gr.fuel_liter_current_quantity)
+
+        # Phase 3 — graphics-block fields for the inputs widget.
+        i = self._frame.inputs
+        i.handbrake = max(0.0, min(1.0, float(gr.handbrake_percent)))
+        # The c_char array comes back null-padded; strip and decode.
+        mode_raw = bytes(gr.performance_mode_name).rstrip(b"\x00")
+        i.performance_mode = mode_raw.decode("ascii", errors="ignore").strip()
 
         # Per-wheel data published as embedded TyreState blocks:
         #   * lock — game-supplied, replaces the slip/angular-speed

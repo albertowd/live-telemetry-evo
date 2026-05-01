@@ -14,12 +14,13 @@ from .telemetry import TelemetryFrame
 from .tray import make_tray
 from .widgets.countdown import CountdownView
 from .widgets.engine_view import EngineView
+from .widgets.inputs_view import InputsView
 from .widgets.wheel_view import WheelView
 from .window import (HOTKEY_QUIT_LABEL, HOTKEY_RESET_LABEL, HOTKEY_SIZE_LABEL,
                      HOTKEY_TOGGLE_LABEL, OverlayWindow)
 
 
-_RESETTABLE_IDS = ("engine", "FL", "FR", "RL", "RR")
+_RESETTABLE_IDS = ("engine", "inputs", "FL", "FR", "RL", "RR")
 
 # Scale factors applied on top of the auto-detected resolution multiplier.
 # Index 2 ("M") is 1.0 — i.e. matches the original auto-picked size.
@@ -34,6 +35,7 @@ DEFAULT_SIZE_INDEX = 2
 # exact original position (no drift from edge-clamping during cycles).
 _ANCHORS: dict[str, tuple[str, str]] = {
     "engine": ("center", "bottom"),
+    "inputs": ("center", "top"),
     "FL": ("left", "top"),
     "FR": ("right", "top"),
     "RL": ("left", "bottom"),
@@ -57,6 +59,8 @@ def _default_pos(wid: str, layout: ScreenLayout) -> tuple[int, int, int, int]:
     """Return (x, y, w, h) for the layout default of a given widget id."""
     if wid == "engine":
         p = layout.engine
+    elif wid == "inputs":
+        p = layout.inputs
     else:
         p = layout.wheels[wid]
     return p.x, p.y, p.w, p.h
@@ -65,6 +69,7 @@ def _default_pos(wid: str, layout: ScreenLayout) -> tuple[int, int, int, int]:
 def _apply_layout(
     window: OverlayWindow,
     engine: EngineView,
+    inputs: InputsView,
     wheels: dict[str, WheelView],
     layout: ScreenLayout,
 ) -> None:
@@ -94,6 +99,13 @@ def _apply_layout(
     else:
         engine.hide()
 
+    _place("inputs", inputs, *_default_pos("inputs", layout))
+    inputs.moved_to.connect(lambda x, y: save_position("inputs", x, y))
+    inputs.closed.connect(lambda: (inputs.hide(), save_visibility("inputs", False)))
+    # Phase-3 widget hidden by default for now — Ctrl+Alt+R / tray Reset
+    # brings it back when the user wants to see it.
+    inputs.hide()
+
     for wid, view in wheels.items():
         _place(wid, view, *_default_pos(wid, layout))
         # Default-arg trick binds the loop variable into each lambda;
@@ -107,13 +119,16 @@ def _apply_layout(
             view.hide()
 
 
-def _reset_layout(engine: EngineView, wheels: dict[str, WheelView],
+def _reset_layout(engine: EngineView, inputs: InputsView,
+                  wheels: dict[str, WheelView],
                   layout: ScreenLayout) -> None:
     """Restore every overlay widget to its default position and shown
     state, and wipe persisted entries for them."""
     delete_entries(list(_RESETTABLE_IDS))
     engine.setGeometry(*_default_pos("engine", layout))
     engine.show()
+    inputs.setGeometry(*_default_pos("inputs", layout))
+    inputs.show()
     for wid, view in wheels.items():
         view.setGeometry(*_default_pos(wid, layout))
         view.show()
@@ -147,10 +162,13 @@ def _anchor_resize(view, wid: str, new_w: int, new_h: int,
     view.setGeometry(new_x, new_y, new_w, new_h)
 
 
-def _resize_widgets(engine: EngineView, wheels: dict[str, WheelView],
+def _resize_widgets(engine: EngineView, inputs: InputsView,
+                    wheels: dict[str, WheelView],
                     layout: ScreenLayout) -> None:
-    """Re-apply layout-computed dimensions for engine + wheels."""
+    """Re-apply layout-computed dimensions for engine + inputs + wheels."""
     _anchor_resize(engine, "engine", layout.engine.w, layout.engine.h,
+                   layout.screen_w, layout.screen_h)
+    _anchor_resize(inputs, "inputs", layout.inputs.w, layout.inputs.h,
                    layout.screen_w, layout.screen_h)
     for wid, view in wheels.items():
         place = layout.wheels[wid]
@@ -158,8 +176,10 @@ def _resize_widgets(engine: EngineView, wheels: dict[str, WheelView],
                        layout.screen_w, layout.screen_h)
 
 
-def _on_frame(frame: TelemetryFrame, engine: EngineView, wheels: dict[str, WheelView]) -> None:
+def _on_frame(frame: TelemetryFrame, engine: EngineView,
+              inputs: InputsView, wheels: dict[str, WheelView]) -> None:
     engine.set_data(frame.engine)
+    inputs.set_data(frame.inputs)
     for wid, view in wheels.items():
         view.set_data(frame.wheels[wid])
 
@@ -192,6 +212,7 @@ def run(argv: list[str] | None = None) -> int:
     window = OverlayWindow()
 
     engine = EngineView()
+    inputs = InputsView()
     wheels = {wid: WheelView(wid) for wid in ("FL", "FR", "RL", "RR")}
 
     # ``size_idx`` and ``layout`` are mutated by the size-cycle handler
@@ -200,7 +221,7 @@ def run(argv: list[str] | None = None) -> int:
     base_mult = pick_resolution(geom.height())[1]
     actual_mult = base_mult * SIZE_FACTORS[size_idx]
     layout = compute_layout(geom.width(), geom.height(), multiplier=actual_mult)
-    _apply_layout(window, engine, wheels, layout)
+    _apply_layout(window, engine, inputs, wheels, layout)
     window.move(geom.x(), geom.y())
 
     def _set_size(idx: int) -> None:
@@ -210,13 +231,13 @@ def run(argv: list[str] | None = None) -> int:
         save_size_index(idx)
         new_mult = base_mult * SIZE_FACTORS[idx]
         layout = compute_layout(geom.width(), geom.height(), multiplier=new_mult)
-        _resize_widgets(engine, wheels, layout)
+        _resize_widgets(engine, inputs, wheels, layout)
 
     def _cycle_size() -> None:
         _set_size((size_idx + 1) % len(SIZE_FACTORS))
 
     def _do_reset() -> None:
-        _reset_layout(engine, wheels, layout)
+        _reset_layout(engine, inputs, wheels, layout)
 
     # Global hotkeys (registered in window.py via Win32 RegisterHotKey).
     window.reset_hotkey.connect(_do_reset)
@@ -245,6 +266,7 @@ def run(argv: list[str] | None = None) -> int:
     # data the instant they appear.
     visibility = load_visibility()
     engine.hide()
+    inputs.hide()
     for view in wheels.values():
         view.hide()
 
@@ -255,6 +277,7 @@ def run(argv: list[str] | None = None) -> int:
     def _reveal_widgets() -> None:
         if visibility.get("engine", True):
             engine.show()
+        # Inputs widget stays hidden after the countdown — see _apply_layout.
         for wid, view in wheels.items():
             if visibility.get(wid, True):
                 view.show()
@@ -262,7 +285,7 @@ def run(argv: list[str] | None = None) -> int:
     countdown.finished.connect(_reveal_widgets)
 
     source = make_source(args.source, hz=args.hz, parent=window)
-    source.frame.connect(lambda f: _on_frame(f, engine, wheels))
+    source.frame.connect(lambda f: _on_frame(f, engine, inputs, wheels))
     source.start()
 
     print(

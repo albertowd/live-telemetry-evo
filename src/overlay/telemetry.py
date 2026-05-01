@@ -86,8 +86,36 @@ class EngineData:
 
 
 @dataclass
+class InputsData:
+    """Driver-input + dynamics + car-state sample (Phase 3 widget).
+
+    Pedals are 0..1, steering is -1..1 (negative = left), g-forces are in g.
+    All defaults are 0/empty so a source that doesn't publish a given
+    field renders as "idle" rather than as garbage.
+    """
+
+    throttle: float = 0.0
+    brake: float = 0.0
+    clutch: float = 0.0
+    handbrake: float = 0.0
+    steering: float = 0.0          # -1..1
+    steering_deg: float = 0.0      # signed degrees of wheel deflection
+    ffb: float = 0.0               # 0..1; 1.0 = clipping
+    g_lat: float = 0.0
+    g_long: float = 0.0
+    g_vert: float = 0.0
+    # Five-zone body damage (0 = pristine, 1 = wreckage). AC Evo's
+    # ``carDamage[5]`` ordering is front / rear / left / right / centre.
+    damage: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 0.0)
+    tyres_out: int = 0             # number of tyres off-track, 0..4
+    performance_mode: str = ""     # car preset name (e.g. "WET", "QUAL")
+
+
+@dataclass
 class TelemetryFrame:
-    """One full snapshot: engine state + per-wheel state for FL/FR/RL/RR."""
+    """One full snapshot: engine state + per-wheel state for FL/FR/RL/RR
+    plus driver-input / dynamics / car-state for the inputs widget."""
 
     engine: EngineData = field(default_factory=EngineData)
+    inputs: InputsData = field(default_factory=InputsData)
     wheels: dict[str, WheelData] = field(default_factory=lambda: {w: WheelData() for w in WHEEL_IDS})

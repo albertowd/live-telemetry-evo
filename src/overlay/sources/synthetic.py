@@ -102,6 +102,31 @@ class SyntheticTelemetrySource(TelemetrySource):
         e.fuel_liters = max(0.0, 50.0 - (t * 0.1) % 50.0)
         e.brake_bias = 0.55 + math.sin(t * 0.02) * 0.04
 
+        # Phase 3 — driver inputs / dynamics / car state for the inputs
+        # widget. Re-use the existing throttle/brake oscillators so the
+        # inputs widget stays coherent with the engine bar's RPM output.
+        i = self._frame.inputs
+        i.throttle = throttle
+        i.brake = brake
+        i.clutch = max(0.0, min(1.0, -math.sin(t * 0.6) * 0.4))  # blip in shifts
+        i.handbrake = 0.0
+        # Steering follows the cornering oscillator, in -1..1 input units
+        # plus a synthesized degree value (typical max wheel lock 540°/2).
+        i.steering = max(-1.0, min(1.0, cornering * 0.7))
+        i.steering_deg = i.steering * 270.0
+        i.ffb = max(0.0, min(1.0, abs(cornering) * 0.6 + brake * 0.3))
+        # G-forces from the same lateral / longitudinal model.
+        i.g_lat = cornering * 1.5                 # up to ~1.5 g of lateral
+        i.g_long = -brake * 1.8 + throttle * 0.6  # braking decel beats accel
+        i.g_vert = 1.0 + math.sin(t * 7.0) * 0.05  # gentle suspension noise
+        # Slowly accumulating damage so the chips light up over time.
+        front = min(1.0, brake * 0.0005 + (t * 0.0001))
+        i.damage = (front, front * 0.3, 0.0, 0.0, 0.0)
+        # Tyres-out fires briefly during heavy cornering so the chip is
+        # visible without the dev needing to drive off-track.
+        i.tyres_out = 2 if abs(cornering) > 0.95 else 0
+        i.performance_mode = "WET" if math.sin(t * 0.07) > 0.0 else "QUAL"
+
         for wid, w in self._frame.wheels.items():
             is_front = wid[0] == "F"
             is_left = wid[1] == "L"
