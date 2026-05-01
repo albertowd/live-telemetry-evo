@@ -34,7 +34,7 @@ BUILD_DIR = ROOT / "build"
 
 def _read_version() -> str:
     """Pull ``project.version`` from pyproject.toml without depending on
-    ``tomllib`` (3.11+) — a regex over the line is enough for our flat
+    ``tomllib`` (3.11+) -- a regex over the line is enough for our flat
     metadata block and keeps the script working on Python 3.10."""
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     m = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
@@ -67,7 +67,7 @@ def _convert_icon() -> Path | None:
     if ICON_ICO.exists() and not ICON_PNG.exists():
         return ICON_ICO
     if not ICON_PNG.exists():
-        print(f"[build] no icon at {ICON_PNG} — building without one")
+        print(f"[build] no icon at {ICON_PNG} -- building without one")
         return None
     try:
         from PIL import Image
@@ -112,7 +112,7 @@ def main() -> int:
         "--specpath", str(BUILD_DIR),
     ]
     # Bundle the source PNG so the system-tray icon can load it at
-    # runtime — the embedded .ico (--icon) only sets the EXE icon.
+    # runtime -- the embedded .ico (--icon) only sets the EXE icon.
     if ICON_PNG.exists():
         cmd.extend(["--add-data", f"{ICON_PNG};resources"])
     if icon is not None:
@@ -128,7 +128,7 @@ def main() -> int:
     if not out.exists():
         sys.stderr.write(f"[build] expected {out}, but it wasn't produced\n")
         return 1
-    print(f"[build] success → {out}  ({out.stat().st_size / (1024 * 1024):.1f} MB)")
+    print(f"[build] success -> {out}  ({out.stat().st_size / (1024 * 1024):.1f} MB)")
 
     # PyInstaller drops a one-folder fallback alongside the onefile exe;
     # delete it so the dist directory holds only the redistributable.

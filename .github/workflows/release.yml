@@ -16,12 +16,19 @@ jobs:
   build:
     name: Build Windows executable
     runs-on: windows-latest
+    env:
+      # Force Python to use UTF-8 for stdout/stderr/I-O on the Windows
+      # runner. Without this, the runner's default code page (cp1252)
+      # raises ``UnicodeEncodeError`` on any non-ASCII character that
+      # build.py / extract_changelog.py print.
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
@@ -58,7 +65,7 @@ jobs:
         run: python tools/extract_changelog.py "${{ github.ref_name }}" release_notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/ACEvoOverlay-*.exe
