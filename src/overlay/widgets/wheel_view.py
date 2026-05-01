@@ -191,9 +191,12 @@ class WheelView(DraggableWidget):
         # inner area at full extension and SHRINKS as the suspension
         # compresses (height proportional to remaining travel, 1 - ratio).
         # Counter-intuitive vs a typical "load grows" gauge but kept for
-        # parity with LiveTelemetry. 10x44 padding inside the icon graphic.
-        inner = QRectF(rect.x() + 10.0, rect.y() + 44.0,
-                       rect.width() - 20.0, rect.height() - 88.0)
+        # parity with LiveTelemetry. The icon's two vertical rails sit at
+        # x=0..10 and x=54..64; the fill *overlaps* each rail by 2 px so
+        # the rails' anti-aliased edges can't leave a transparent seam at
+        # fractional widget scales.
+        inner = QRectF(rect.x() + 8.0, rect.y() + 44.0,
+                       rect.width() - 16.0, rect.height() - 88.0)
         fill_h = inner.height() * max(0.0, min(1.0, 1.0 - travel))
         p.setPen(Qt.NoPen)
         p.setBrush(band)
@@ -206,16 +209,21 @@ class WheelView(DraggableWidget):
         p.setBrush(Colors.black)
         p.drawRect(rect)
 
-        # Display the 0.85..1.00 range — AC Evo reports wear on a small
-        # scale (1.0 = fresh, ~0.85 = significantly worn), so a narrower
-        # band would leave the bar pinned at full all session.
-        if d.tire_w > 0.95:
+        # Map only the *usable* portion of the wear cycle to the bar.
+        # AC Evo reports wear on a small scale (1.0 = fresh; the tyre is
+        # past its performance cliff well before 0.85), so an empty bar
+        # means "pit now", not "still has some life left somewhere". The
+        # 0.93..1.00 window is tight enough that wear ticks fill the bar
+        # across its full height instead of crawling through the top
+        # pixels, and the colour bands move 3 % earlier so red lands
+        # while there's still time to react.
+        if d.tire_w > 0.98:
             color = Colors.green
-        elif d.tire_w > 0.90:
+        elif d.tire_w > 0.95:
             color = Colors.yellow
         else:
             color = Colors.red
-        wear = max(0.0, min(1.0, (d.tire_w - 0.85) / 0.15))
+        wear = max(0.0, min(1.0, (d.tire_w - 0.93) / 0.07))
         fill_h = wear * rect.height()
         fill = QRectF(rect.x(), rect.bottom() - fill_h, rect.width(), fill_h)
         p.setPen(Qt.NoPen)
