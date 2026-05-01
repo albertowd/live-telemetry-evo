@@ -12,7 +12,7 @@ class WheelData:
     porting target stays familiar; AC Evo equivalents will be wired in later."""
     abs_active: bool = False
     brake_t: float = 100.0    # brake disc temperature, C
-    camber: float = 0.0       # radians, negative = top-in
+    camber: float = 0.0       # radians, raw per-wheel local frame (sign meaning is wheel-side dependent on AC Evo — see ac_evo.py)
     compound: str = ""        # tyre compound name (e.g. "SOFT")
     height: float = 0.0       # mm, ride height
     lock: bool = False

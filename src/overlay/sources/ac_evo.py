@@ -172,6 +172,13 @@ class _SPageFilePhysics(ctypes.Structure):
         ("tyreWear", c_float * 4),
         ("tyreDirtyLevel", c_float * 4),
         ("tyreCoreTemperature", c_float * 4),
+        # camberRAD has a per-wheel local sign convention: the setup-tool
+        # "negative = top-in" convention only matches the shared-memory
+        # sign for left-side wheels. Right-side wheels report the
+        # opposite sign — a setup of -2.5 degrees on FR/RR comes through
+        # as +0.044 / +0.035 rad. Magnitude always matches the setup
+        # tool. Negate FR/RR if you need a uniform "negative = top-in"
+        # semantic.
         ("camberRAD", c_float * 4),
         ("suspensionTravel", c_float * 4),
         ("drs", c_float),
@@ -232,8 +239,19 @@ class _SPageFilePhysics(ctypes.Structure):
         ("brakeTorque", c_float * 4),              # Nm per wheel
         ("frontBrakeCompound", c_int32),
         ("rearBrakeCompound", c_int32),
-        ("padLife", c_float * 4),                  # 0..1 per corner
-        ("discLife", c_float * 4),                 # 0..1 per corner
+        # AC1 SDK called these padLife / discLife with 1.0 = fresh, 0.0 =
+        # dead. The numeric values match the in-game pad-/disc-wear
+        # readouts when scaled ×1000 (e.g. 0.029 → 29.00 in HUD), so
+        # earlier we assumed AC EVO had inverted to a "wear" semantic.
+        # A 4-lap A/B test proved that wrong — the values *decreased*
+        # by a small consistent amount per wheel, with fronts losing
+        # twice as much as rears (fronts brake harder). That's "life
+        # remaining" behaviour. AC1 naming kept; semantic 1.0 = fresh,
+        # decreasing toward 0.0 = dead, but the absolute scale is
+        # unclear (0.029 doesn't read as "2.9 % of fresh life"; it may
+        # be in some other unit the HUD multiplies by 1000 to display).
+        ("padLife", c_float * 4),
+        ("discLife", c_float * 4),
         ("ignitionOn", c_int32),
         ("starterEngineOn", c_int32),
         ("isEngineRunning", c_int32),
@@ -742,11 +760,16 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.tire_t_m = float(ph.tyreTempM[idx])
             w.tire_t_o = float(ph.tyreTempO[idx])
             w.brake_t = float(ph.brakeTemp[idx])
-            # tyreWear: AC Evo writes this at the AC1 offset but the
-            # semantics are *inverted* — 0.0 = new, 1.0 = fully worn (per
-            # the official shared-memory documentation). The overlay treats
-            # tire_w as "remaining" (1.0 = fresh, 0.0 = dead), so we flip.
-            w.tire_w = max(0.0, min(1.0, 1.0 - float(ph.tyreWear[idx])))
+            # Tyre wear is currently *unsourced* on AC EVO. The documented
+            # offset 120 (`tyreWear`) reads 0.0 all session, and the
+            # 740..771 block we briefly mistook for wear turned out to be
+            # brake pad/disc wear (matches the in-game pad/disc-wear
+            # readouts exactly). The real tyre-wear field hasn't been
+            # located yet — the in-game "2.98 %" and per-face OMIs are
+            # almost certainly in one of the still-opaque graphics
+            # substructs. Until then, leave `tire_w` at its default
+            # (1.0 = fresh) so the wear bar reads "no info" rather than
+            # lying about a value we don't have.
 
     def _apply_graphics(self, gr: _SPageFileGraphic) -> None:
         """Pull HUD/graphics fields that complement (and in places replace)

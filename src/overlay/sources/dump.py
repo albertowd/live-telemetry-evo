@@ -118,7 +118,15 @@ def _print_parsed(reader: AcEvoSharedMemoryReader, segment: str) -> None:
         print(f"  wheelLoad      {tuple(ph.wheelLoad)}")
         print(f"  wheelsPressure {tuple(ph.wheelsPressure)}")
         print(f"  tyreCoreTemp   {tuple(ph.tyreCoreTemperature)}")
-        print(f"  tyreWear       {tuple(ph.tyreWear)}")
+        # AC1 `tyreWear` (offset 120) is dead in current AC EVO builds —
+        # always 0.0; print it anyway so any future revival is obvious.
+        # padLife/discLife at 740/756 keep the AC1 semantic (1.0 = fresh,
+        # decreasing toward 0); multiply by 1000 to match the in-game
+        # pad/disc readouts. Live tyre wear (the in-game "X.XX" line) is
+        # NOT in shared memory — game-internal, not exposed.
+        print(f"  tyreWear (120) [DEAD]  {tuple(ph.tyreWear)}")
+        print(f"  padLife  (740) ×1000   {tuple(round(x * 1000, 2) for x in ph.padLife)}")
+        print(f"  discLife (756) ×1000   {tuple(round(x * 1000, 2) for x in ph.discLife)}")
         print(f"  tyreDirtyLevel {tuple(ph.tyreDirtyLevel)}")
         print(f"  brakeTemp      {tuple(ph.brakeTemp)}")
         print(f"  rideHeight     {tuple(ph.rideHeight)}")
@@ -156,6 +164,21 @@ def _print_parsed(reader: AcEvoSharedMemoryReader, segment: str) -> None:
                   f"{d.tyre_temperature_c:6.1f}  {d.tyre_normalized_temperature_core:7.3f}  "
                   f"{d.brake_temperature_c:8.0f}  {d.brake_normalized_temperature:7.3f}  "
                   f"{cf}/{cr}")
+        # Per-face temps: hypothesised to match the game's "OMI" HUD line.
+        # Print both raw °C and game-normalised so a side-by-side check
+        # against the on-screen values is one glance.
+        print()
+        print("[graphics] per-face tyre temps (raw °C / normalized) — verify against game OMI line:")
+        print(f"  {'wheel':5}  {'L_c':>6}  {'M_c':>6}  {'R_c':>6}  "
+              f"{'L_n':>6}  {'M_n':>6}  {'R_n':>6}")
+        for label, ts in (("FL", gr.tyre_lf), ("FR", gr.tyre_rf),
+                          ("RL", gr.tyre_lr), ("RR", gr.tyre_rr)):
+            d = ts.data
+            print(f"  {label:5}  {d.tyre_temperature_left:6.2f}  "
+                  f"{d.tyre_temperature_center:6.2f}  {d.tyre_temperature_right:6.2f}  "
+                  f"{d.tyre_normalized_temperature_left:6.3f}  "
+                  f"{d.tyre_normalized_temperature_center:6.3f}  "
+                  f"{d.tyre_normalized_temperature_right:6.3f}")
     else:
         print(f"[{segment}] parsed view not implemented yet — use --bytes for a hex dump")
 

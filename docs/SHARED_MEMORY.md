@@ -167,10 +167,10 @@ because there are no `char[N]` or `bool` fields in this block.
 |     72 |   16 | `float[4]`  | `wheelLoad`            | N                        | Vertical load per corner. |
 |     88 |   16 | `float[4]`  | `wheelsPressure`       | psi                      | Inflation pressure. |
 |    104 |   16 | `float[4]`  | `wheelAngularSpeed`    | rad/s                    | Per-wheel angular speed. |
-|    120 |   16 | `float[4]`  | `tyreWear`             | 0..1, **0 = new**        | **Inverted vs AC1.** AC1 had `0..100 = % remaining`. AC EVO writes `0.0` on new tyres and `1.0` on fully worn — flip if you want a "remaining grip" semantic. |
+|    120 |   16 | `float[4]`  | `tyreWear`             | **dead** in current builds | The AC1 SDK published live wear here. **Current AC EVO writes `0.0` to all four slots all session** — verified across multiple sessions. **Tyre wear is confirmed NOT exposed via shared memory at any offset** — two independent A/B snapshot diffs (4 normal laps, then 5 laps with extreme L/R-asymmetric setup that should produce 5–10× wear differential between sides) both failed to surface any 4-wheel wear-shaped block in either physics (4 KB) or graphics (8 KB), at any plausible scale, including reserved padding inside each `SMEvoTyreState` and inside every still-opaque substruct. The HUD's "tyre wear N.NN" is computed by the game internally and never published. Keep the field in any port for AC1 compatibility but don't read from it. |
 |    136 |   16 | `float[4]`  | `tyreDirtyLevel`       | 0..4 (approximate)        | Surface contamination from off-track grass/sand/marbles. |
 |    152 |   16 | `float[4]`  | `tyreCoreTemperature`  | °C                       | Carcass core temperature. |
-|    168 |   16 | `float[4]`  | `camberRAD`            | rad                      | Negative = top-in (typical). |
+|    168 |   16 | `float[4]`  | `camberRAD`            | rad, **per-wheel local sign** | The setup-tool convention "negative = top-in" only matches shared-memory sign for **left-side wheels**. Right-side wheels report the **opposite sign**: a setup of −2.5° on FR/RR comes through as `+0.044` rad / `+0.035` rad here. Magnitude always matches the setup tool; sign is each wheel's outward-facing local frame. To translate to the uniform "negative = top-in" semantic, negate the right-side values. |
 |    184 |   16 | `float[4]`  | `suspensionTravel`     | m                        | AC EVO no longer publishes a per-car max — calibrate by rolling-max. **Sign convention varies by car**: most cars report positive metres from full extension, but cars with active / electronically managed suspension report signed displacement from a static reference (rest near 0, compression negative). Take `abs()` before calibrating to handle both. |
 |    200 |    4 | `float`     | `drs`                  | 0..1                     | DRS deploy state. |
 |    204 |    4 | `float`     | `tc`                   | 0..1                     | Traction-control aid **strength setting** (not "currently cutting" — see `tcInAction`). |
@@ -178,7 +178,7 @@ because there are no `char[N]` or `bool` fields in this block.
 |    212 |    4 | `float`     | `pitch`                | rad                      | |
 |    216 |    4 | `float`     | `roll`                 | rad                      | |
 |    220 |    4 | `float`     | `cgHeight`             | m                        | Centre-of-gravity height. |
-|    224 |   20 | `float[5]`  | `carDamage`            | 0..1 per zone            | `[0]=front, [1]=rear, [2]=left, [3]=right, [4]=centre`. |
+|    224 |   20 | `float[5]`  | `carDamage`            | **NOT** 0..1 — absolute damage units | `[0]=front, [1]=rear, [2]=left, [3]=right, [4]=centre`. AC1 documented this as 0..1; in current AC EVO builds the values are **absolute**, magnitudes well above 1.0 — a verified front+centre crash produced `front=198.64`, `centre=237.11`, `rear=19.69`, `right=18.78`. Likely unit is impulsive energy (J) or plastic deformation (mm); not yet calibrated. UI consumers should clamp/normalise per their own threshold rather than treating the value as a fraction. |
 |    244 |    4 | `int32`     | `numberOfTyresOut`     | 0..4                     | Tyres currently off-track. |
 |    248 |    4 | `int32`     | `pitLimiterOn`         | 0/1                      | |
 |    252 |    4 | `float`     | `abs`                  | 0..1                     | ABS aid strength setting (see `absInAction`). |
@@ -234,8 +234,8 @@ because there are no `char[N]` or `bool` fields in this block.
 |    716 |   16 | `float[4]`       | `brakeTorque`         | Nm per wheel           | |
 |    732 |    4 | `int32`          | `frontBrakeCompound`  | enum                   | Brake-pad compound index. |
 |    736 |    4 | `int32`          | `rearBrakeCompound`   | enum                   | |
-|    740 |   16 | `float[4]`       | `padLife`             | 0..1, 1 = fresh        | |
-|    756 |   16 | `float[4]`       | `discLife`            | 0..1, 1 = fresh        | |
+|    740 |   16 | `float[4]`       | `padLife`             | **1 = fresh, decreasing → 0 = dead** | Same field, same name as the AC1 SDK. Numerically matches the in-game pad readout when scaled ×1000 (e.g. 0.029 → "29.00" in HUD). A 4-lap A/B test confirmed the AC1 "life remaining" semantic is still in effect: values **decreased** consistently across all four wheels (fronts shed twice as much as rears, matching the brake-force split). Note however that absolute values look surprisingly low for a "life remaining" interpretation (0.029 doesn't read like "2.9 % of fresh life left"); the absolute scale or unit is uncertain. Treat the value as a relative wear indicator, not as a calibrated remaining-fraction. |
+|    756 |   16 | `float[4]`       | `discLife`            | **1 = fresh, decreasing → 0 = dead** | Same provenance and semantics as `padLife`. Front discs lose life roughly 2× faster than rears under typical brake balance. |
 |    772 |    4 | `int32`          | `ignitionOn`          | 0/1                    | |
 |    776 |    4 | `int32`          | `starterEngineOn`     | 0/1                    | |
 |    780 |    4 | `int32`          | `isEngineRunning`     | 0/1                    | |
@@ -578,7 +578,7 @@ Where to source car specs now:
 | `float`     | `tyre_temperature_right`                 | °C, right face. |
 | `char[33]`  | `tyre_compound_front`                    | Compound name, replicated in all four states. |
 | `char[33]`  | `tyre_compound_rear`                     | |
-| `float`     | `tyre_normalized_pressure`               | 1.0 = ideal cold pressure for current compound. |
+| `float`     | `tyre_normalized_pressure`               | 1.0 = ideal cold pressure for current compound. **Not capped at 1.0** — under-inflated tyres read fractional values (e.g. 20-psi vs ideal-26 reads ~0.877), over-inflated tyres go above 1.0, with an observed **upper clamp at exactly 2.000** (a 35-psi setup hit the ceiling regardless of how much further over-pressure it was). |
 | `float`     | `tyre_normalized_temperature_left`       | 1.0 = ideal. |
 | `float`     | `tyre_normalized_temperature_center`     | 1.0 = ideal. |
 | `float`     | `tyre_normalized_temperature_right`      | 1.0 = ideal. |
@@ -590,6 +590,18 @@ The "left/right" axis is the **contact-patch face viewed from outside
 the car**: a left-side wheel has `left = outer face, right = inner
 face`; right-side wheels are mirrored. The overlay normalises this via
 the `is_left = wid[1] == "L"` check.
+
+The in-game HUD's "OMI" line (three temperature numbers per tyre,
+e.g. `60.00 / 60.00 / 60.00` parked, diverging into a per-face
+gradient under cornering load) **is `tyre_temperature_left / _center
+/ _right` in raw °C**. Verified by a 4-lap A/B test on a
+left-turn-biased track: parked baseline read uniform 60 / 60 / 60
+across all four tyres, post-laps read showed exactly the asymmetric
+heat distribution the physics demands — left-side tyres warmed
+~5–10 °C with a rising L→R gradient (inner-face hottest under
+cornering camber load), right-side tyres equilibrated below 60 °C
+with a falling L→R gradient. Both magnitude and per-face gradient
+direction match what the in-game HUD displayed.
 
 ### 7.2 Damage state (128 B) — opaque
 
@@ -718,15 +730,39 @@ Numeric values TBC.
 These are the traps that most reliably cause AC1-era code to misbehave
 when re-pointed at AC EVO.
 
-### 9.1 `tyreWear` is inverted
+### 9.1 `tyreWear` is dead in AC EVO (and the live wear is unreachable)
 
-AC1: `tyreWear ∈ [0, 100]`, **0 = worn, 100 = fresh**, percent
-remaining.
-AC EVO: `tyreWear ∈ [0, 1]`, **0 = new, 1 = fully worn**.
+AC1 published live tyre wear as `tyreWear ∈ [0, 100]` (percent
+remaining, 100 = fresh). The Steam-guide-documented AC EVO version of
+the same field uses an inverted `[0, 1]` "fraction worn" scale (0 =
+new, 1 = fully worn) — but **it is never populated**: across multiple
+sessions the field reads `(0.0, 0.0, 0.0, 0.0)` from the moment the
+mapping appears until session end, regardless of how long you drive.
+The overlay used to compute `tire_w = 1 - tyreWear` from this field;
+that's now a constant 1.0 (i.e. "fresh") and the wear bar is a
+permanent placeholder until/unless Kunos populates the field.
 
-The overlay maps to a "remaining grip" value with `tire_w = 1 -
-tyreWear`. Forgetting this flip makes a fresh tyre render as "fully
-worn".
+**Three independent investigations** (in order of definitiveness):
+
+1. *4 normal laps, A/B diff:* no wear-shaped 4-wheel block changed.
+2. *5 laps with extreme L/R-asymmetric setup* (left tyres 20 psi /
+   −4° camber, right tyres 35 psi / −2.5° camber): no asymmetric
+   wear-shaped block.
+3. *5 laps with diagonal pressure asymmetry + dual compound*
+   (front road tyres, rear hyper tyres) **plus an explicit
+   value-targeted scan** using HUD readouts `[FL=7.97, FR=7.99,
+   RL=6.98, RR=6.98]`: no aligned float anywhere in physics (4 KB)
+   or graphics (8 KB) holds any of those values at any scale (×1,
+   ×0.1, ×0.01, ×0.001), as a double, as an integer, contiguous, or
+   TyreState-strided. A wider sanity scan looking for *any* aligned
+   float anywhere in either block whose value falls in `[6.5, 8.5]`
+   returned **zero hits** — confirming there's nothing in the
+   right magnitude range to even be a candidate.
+
+Every other HUD value (pressure, temperature, pad/disc life,
+brake pressure, etc.) is locatable via the same value-targeted
+search. Only tyre wear cannot. **The HUD's tyre-wear figure is
+computed by the game internally and never written to shared memory.**
 
 ### 9.2 The static block is no longer car-focused
 
@@ -790,6 +826,31 @@ Same wheels, just a different naming convention. Map at the boundary.
 all four `SMEvoTyreState` instances. Read once (e.g. from
 `tyre_lf`) — they don't differ between the four.
 
+### 9.7a `camberRAD` sign is per-wheel local, not uniform
+
+The setup-tool convention "negative camber = top tilted toward the
+car" only matches the shared-memory sign for **left-side wheels**.
+Right-side wheels report the **opposite sign**: a setup of −2.5° on
+FR/RR comes through `physics.camberRAD` as `+0.044` rad / `+0.035`
+rad. Magnitude always matches the setup tool exactly; the sign is
+each wheel's outward-facing local frame. To recover a uniform
+"negative = top-in" semantic, negate the right-side values
+(`camberRAD[1]`, `camberRAD[3]`). The overlay's camber-strip widget
+happens to render correctly *because* the sign is per-wheel local —
+each wheel's strip leans in the direction the top of that wheel is
+actually tilted. Consumers comparing camber across sides (e.g. a
+single uniform "max camber" warning) need to apply the negation.
+
+### 9.7b `physics.carDamage[5]` is not 0..1
+
+AC1 documented `carDamage[5]` as 0..1 per zone. AC EVO writes
+**absolute** damage values into the same slot, with magnitudes well
+above 1.0 — a verified front+centre crash produced `front=198.64`,
+`centre=237.11`, `rear=19.69`, `right=18.78`. Likely unit is impulse
+energy (J) or plastic deformation (mm), not yet calibrated. UI
+consumers must clamp/normalise per their own threshold; treating the
+value as a fraction will saturate any visual gauge instantly.
+
 ### 9.8 `c_bool` is one byte, `int32` flags are four
 
 AC EVO mixes the two. The graphics block uses `c_bool` heavily, while
@@ -809,6 +870,26 @@ decoding. Listed by priority (highest-value first):
    session time/laps remaining, sector boundaries, weather phase.
    Comparing dumps across session-type changes (practice → qual →
    race) will quickly spot the type-discriminator field.
+1a. **Tyre wear: confirmed NOT in shared memory** (closed
+   investigation). The in-game HUD shows a "tyre wear N.NN %" line
+   per tyre, but **two independent A/B snapshot diffs failed to find
+   any wear-shaped 4-wheel block** anywhere in physics or graphics —
+   first across 4 normal laps, then across 5 laps with deliberately
+   wear-asymmetric setup (left tyres 20 psi / −4° camber, right tyres
+   35 psi / −2.5° camber, which should produce 5–10× different wear
+   per side). Neither test surfaced a candidate at any 4-byte aligned
+   offset, at any plausible scale, in any reserved padding, or in any
+   opaque substruct. The HUD value is computed by the game and never
+   published via SHM. **Tyre wear cannot be retrieved.** Consumers
+   that need a wear indicator must either repurpose `padLife` /
+   `discLife` (see §4.2 — moves slowly, axle-symmetric) or synthesise
+   one from `slipRatio × wheelLoad × dt` integrated per wheel.
+
+   Companion finding: the HUD's "OMI" line *is* in shared memory —
+   it's `tyre_temperature_left/center/right` in raw °C. Verified
+   against live HUD with matching gradients across asymmetric driving
+   (see §7.1).
+
 2. **`graphics.timing_state` (256 B)** — sector splits, theoretical
    best, gap-to-leader. Triggering a lap completion and capturing
    before/after dumps will surface the split-time fields.

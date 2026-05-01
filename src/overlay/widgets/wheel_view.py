@@ -296,9 +296,11 @@ class WheelView(DraggableWidget):
 
     def _draw_load(self, p: QPainter, d: WheelData) -> None:
         # The load circle stays centred over the tire and grows with load.
-        # Original Box: (128, 0, 256, 256) → centre (256, 128).
+        # Cap the diameter at the tire silhouette's width (160 px) so a
+        # heavy hit can't bulge the circle past the rubber it's
+        # describing.
         center = QPointF(256.0, 128.0)
-        diameter = max(40.0, min(256.0, d.tire_l * LOAD_PX_PER_N))
+        diameter = max(40.0, min(160.0, d.tire_l * LOAD_PX_PER_N))
         rect = QRectF(center.x() - diameter / 2.0,
                       center.y() - diameter / 2.0,
                       diameter, diameter)
