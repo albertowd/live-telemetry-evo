@@ -54,30 +54,42 @@ polls quietly once a second and connects automatically when AC Evo starts publis
 | Shortcut     | Action                                                              |
 | ------------ | ------------------------------------------------------------------- |
 | `Ctrl+Alt+L` | Toggle click-through (lock / unlock the overlay for repositioning). |
+| `Ctrl+Alt+R` | Reset every widget to its default position and visibility.          |
+| `Ctrl+Alt+S` | Cycle widget size: `XS → S → M → L → XL → XS …`. Persists.          |
 | `Ctrl+Alt+Q` | Quit the overlay.                                                   |
 
 These use Win32 `RegisterHotKey`, so they fire even while the game has focus.
 
+### System-tray icon
+
+The overlay registers an icon in the Windows notification area. Left- or right-click
+it to open a menu mirroring the hotkeys above:
+
+- **Reset positions** — restores the default layout.
+- **Click-through** — checkable; reflects current state.
+- **Size** — submenu with `XS / S / M / L / XL` as a radio group.
+- **Quit** — exits the overlay.
+
+Each menu entry shows its hotkey alongside the label.
+
 ### Mouse — when the overlay is unlocked (click-through OFF)
 
-| Action                       | Result                                                       |
-| ---------------------------- | ------------------------------------------------------------ |
-| Drag a widget                | Move it; position is persisted across sessions.              |
-| Click the `×` on a widget    | Hide it; the hidden state persists across sessions.          |
-| Click the `↺` (reset) button | Restore default positions and visibility for every widget.   |
-| Click the size button        | Cycle through `XS → S → M → L → XL → XS …`. Persists.        |
+| Action                    | Result                                              |
+| ------------------------- | --------------------------------------------------- |
+| Drag a widget             | Move it; position is persisted across sessions.     |
+| Click the `×` on a widget | Hide it; the hidden state persists across sessions. |
 
-The reset and size buttons are draggable but have no `×`, so the layout is always
-recoverable even if you hide everything else.
+If you hide everything, `Ctrl+Alt+R` (or *Reset positions* in the tray) brings the
+whole layout back.
 
 ### Startup behaviour
 
 - **Click-through is ON by default** so the overlay never steals mouse input from the
-  game. Toggle it off (`Ctrl+Alt+L`) only when you want to drag/resize.
+  game. Toggle it off (`Ctrl+Alt+L`) only when you want to drag widgets.
 - A 5-second countdown is drawn full-screen before the telemetry widgets reveal. The
   source still feeds frames during the countdown so values are live the moment the
   widgets appear.
-- Widgets you hid in a previous session stay hidden; the reset button brings them back.
+- Widgets you hid in a previous session stay hidden; `Ctrl+Alt+R` brings them back.
 
 ---
 
@@ -198,9 +210,9 @@ Schema:
 ```
 
 A position is honoured on next launch only if the widget would land fully on screen
-at the current resolution; otherwise it falls back to the layout default. The reset
-button wipes only the telemetry-widget entries — the placement of the floating reset
-and size buttons themselves is preserved.
+at the current resolution; otherwise it falls back to the layout default. *Reset*
+(hotkey `Ctrl+Alt+R` or the tray entry) wipes the telemetry-widget entries; the
+persisted `size_index` is preserved and only changes via `Ctrl+Alt+S` or the tray.
 
 ---
 
@@ -251,6 +263,7 @@ src/overlay/
 ├── __main__.py                # `python -m overlay` entry point
 ├── app.py                     # CLI parsing, layout + size cycling, ties widgets to the source
 ├── window.py                  # frameless / translucent / always-on-top window + Win32 hotkeys
+├── tray.py                    # system-tray icon + context menu (reset / click-through / size / quit)
 ├── layout.py                  # screen-size → multiplier and corner placements
 ├── settings.py                # JSON-backed positions / visibility / size persistence
 ├── colors.py                  # palette ported from lt_colors.py
@@ -267,9 +280,7 @@ src/overlay/
     ├── countdown.py           # full-screen 5 s countdown shown at startup
     ├── draggable.py           # base widget — drag, click, close button
     ├── engine_view.py         # boost bar + RPM/power bar + HP/RPM labels + aid chips
-    ├── wheel_view.py          # tire, temps, pressure, suspension, wear, camber, height, dirt, lock, load
-    ├── reset_button.py        # floating ↺ button — restores default layout
-    └── size_button.py         # floating XS/S/M/L/XL button — cycles widget size
+    └── wheel_view.py          # tire, temps, pressure, suspension, wear, camber, height, dirt, lock, load
 ```
 
 Widgets only know about `TelemetryFrame` shapes, so swapping the synthetic source for

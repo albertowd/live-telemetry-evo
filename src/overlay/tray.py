@@ -8,6 +8,11 @@ from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidget
 from .resources import app_icon_path
 
 
+def _with_shortcut(text: str, shortcut: str | None) -> str:
+    """Embed a shortcut hint Qt right-aligns in the menu, like 'Reset\\tCtrl+Alt+R'."""
+    return f"{text}\t{shortcut}" if shortcut else text
+
+
 def make_tray(
     parent: QWidget,
     on_reset: Callable[[], None],
@@ -17,10 +22,19 @@ def make_tray(
     current_size_index: Callable[[], int],
     size_labels: Sequence[str],
     on_quit: Callable[[], None],
+    reset_shortcut: str | None = None,
+    click_through_shortcut: str | None = None,
+    size_shortcut: str | None = None,
+    quit_shortcut: str | None = None,
 ) -> QSystemTrayIcon | None:
     """Build the notification-area icon and its context menu.
 
     Menu layout: Reset positions / Click-through / Size submenu / Quit.
+    The ``*_shortcut`` strings are display-only hints (e.g. 'Ctrl+Alt+R')
+    appended to the action text — actual key handling is done via
+    Win32 ``RegisterHotKey`` in :class:`OverlayWindow` because the
+    overlay never receives keyboard focus and cannot use ``QShortcut``.
+
     Left-click and right-click both surface the same menu — the overlay
     has no main window to "show", so a primary action that opens the
     menu matches what the user expects from clicking the icon.
@@ -33,13 +47,15 @@ def make_tray(
 
     menu = QMenu(parent)
 
-    reset_action = QAction("Reset positions", menu)
+    reset_action = QAction(_with_shortcut("Reset positions", reset_shortcut), menu)
     reset_action.triggered.connect(on_reset)
     menu.addAction(reset_action)
 
     menu.addSeparator()
 
-    click_through_action = QAction("Click-through", menu)
+    click_through_action = QAction(
+        _with_shortcut("Click-through", click_through_shortcut), menu
+    )
     click_through_action.setCheckable(True)
     # Discard the bool emitted by triggered — the window flips its own
     # state, and aboutToShow re-syncs the checkmark from the source of
@@ -47,7 +63,7 @@ def make_tray(
     click_through_action.triggered.connect(lambda _checked: on_toggle_click_through())
     menu.addAction(click_through_action)
 
-    size_menu = menu.addMenu("Size")
+    size_menu = menu.addMenu(_with_shortcut("Size", size_shortcut))
     # Exclusive group gives radio-button behaviour — exactly one entry
     # is checked at a time, mirroring the floating size button's state.
     size_group = QActionGroup(size_menu)
@@ -65,7 +81,7 @@ def make_tray(
 
     menu.addSeparator()
 
-    quit_action = QAction("Quit", menu)
+    quit_action = QAction(_with_shortcut("Quit", quit_shortcut), menu)
     quit_action.triggered.connect(on_quit)
     menu.addAction(quit_action)
 

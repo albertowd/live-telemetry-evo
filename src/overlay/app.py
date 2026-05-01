@@ -14,14 +14,18 @@ from .telemetry import TelemetryFrame
 from .tray import make_tray
 from .widgets.countdown import CountdownView
 from .widgets.engine_view import EngineView
-from .widgets.reset_button import ResetButton
-from .widgets.size_button import (DEFAULT_SIZE_INDEX, SIZE_FACTORS,
-                                   SIZE_LABELS, SizeButton)
 from .widgets.wheel_view import WheelView
-from .window import OverlayWindow
+from .window import (HOTKEY_QUIT_LABEL, HOTKEY_RESET_LABEL, HOTKEY_SIZE_LABEL,
+                     HOTKEY_TOGGLE_LABEL, OverlayWindow)
 
 
 _RESETTABLE_IDS = ("engine", "FL", "FR", "RL", "RR")
+
+# Scale factors applied on top of the auto-detected resolution multiplier.
+# Index 2 ("M") is 1.0 — i.e. matches the original auto-picked size.
+SIZE_FACTORS: tuple[float, ...] = (0.5, 0.75, 1.0, 1.25, 1.5)
+SIZE_LABELS: tuple[str, ...] = ("XS", "S", "M", "L", "XL")
+DEFAULT_SIZE_INDEX = 2
 
 
 # Anchor corner per widget — kept stable across size cycles so a widget
@@ -34,15 +38,7 @@ _ANCHORS: dict[str, tuple[str, str]] = {
     "FR": ("right", "top"),
     "RL": ("left", "bottom"),
     "RR": ("right", "bottom"),
-    "reset": ("right", "top"),
-    "size": ("right", "top"),
 }
-
-# Reference button size at multiplier 1.0 (matches the resolution-table
-# baseline). Scaled per-cycle so reset/size buttons stay proportional to
-# the widgets they sit alongside.
-_BUTTON_BASE_PX = 36
-_BUTTON_MIN_PX = 20
 
 
 def _resolve_xy(saved: dict[str, tuple[int, int]],
@@ -70,8 +66,6 @@ def _apply_layout(
     window: OverlayWindow,
     engine: EngineView,
     wheels: dict[str, WheelView],
-    reset_btn: ResetButton,
-    size_btn: SizeButton,
     layout: ScreenLayout,
 ) -> None:
     """Stretch the overlay across the screen and place widgets at corners.
@@ -112,29 +106,11 @@ def _apply_layout(
         else:
             view.hide()
 
-    # Control buttons sit in the top-right corner by default. Reset goes
-    # closest to the edge; size button to its left so they read as a row.
-    margin = layout.margin
-    reset_default_x = layout.screen_w - reset_btn.width() - margin
-    reset_default_y = margin
-    _place("reset", reset_btn,
-           reset_default_x, reset_default_y, reset_btn.width(), reset_btn.height())
-    reset_btn.moved_to.connect(lambda x, y: save_position("reset", x, y))
-    reset_btn.show()
-
-    size_default_x = reset_default_x - size_btn.width() - margin // 2
-    size_default_y = reset_default_y
-    _place("size", size_btn,
-           size_default_x, size_default_y, size_btn.width(), size_btn.height())
-    size_btn.moved_to.connect(lambda x, y: save_position("size", x, y))
-    size_btn.show()
-
 
 def _reset_layout(engine: EngineView, wheels: dict[str, WheelView],
                   layout: ScreenLayout) -> None:
     """Restore every overlay widget to its default position and shown
-    state, and wipe persisted entries for them. The reset/size buttons
-    are preserved so the user keeps the spots they put them."""
+    state, and wipe persisted entries for them."""
     delete_entries(list(_RESETTABLE_IDS))
     engine.setGeometry(*_default_pos("engine", layout))
     engine.show()
@@ -146,9 +122,8 @@ def _reset_layout(engine: EngineView, wheels: dict[str, WheelView],
 def _anchor_resize(view, wid: str, new_w: int, new_h: int,
                    screen_w: int, screen_h: int) -> None:
     """Resize a widget to (``new_w``, ``new_h``) while pinning the corner
-    declared in ``_ANCHORS`` for ``wid``. Used for both the telemetry
-    widgets (engine + wheels) and the floating buttons so a size cycle
-    is round-trippable from any of them."""
+    declared in ``_ANCHORS`` for ``wid``. A size cycle is round-trippable:
+    going M → L → M lands the widget back where it started."""
     ax_kind, ay_kind = _ANCHORS[wid]
     old_x, old_y = view.x(), view.y()
     old_w, old_h = view.width(), view.height()
@@ -173,27 +148,14 @@ def _anchor_resize(view, wid: str, new_w: int, new_h: int,
 
 
 def _resize_widgets(engine: EngineView, wheels: dict[str, WheelView],
-                    reset_btn: ResetButton, size_btn: SizeButton,
-                    layout: ScreenLayout, multiplier: float) -> None:
-    """Re-apply layout-computed dimensions for engine + wheels and scale
-    the floating buttons by the same multiplier. Sizing then shrinking
-    is round-trippable: a widget at size M, scaled to L and back, lands
-    in the exact same place — the anchor logic in :func:`_anchor_resize`
-    pins each widget's natural corner."""
+                    layout: ScreenLayout) -> None:
+    """Re-apply layout-computed dimensions for engine + wheels."""
     _anchor_resize(engine, "engine", layout.engine.w, layout.engine.h,
                    layout.screen_w, layout.screen_h)
     for wid, view in wheels.items():
         place = layout.wheels[wid]
         _anchor_resize(view, wid, place.w, place.h,
                        layout.screen_w, layout.screen_h)
-
-    btn_size = max(_BUTTON_MIN_PX, int(_BUTTON_BASE_PX * multiplier))
-    _anchor_resize(reset_btn, "reset", btn_size, btn_size,
-                   layout.screen_w, layout.screen_h)
-    reset_btn.setFixedSize(btn_size, btn_size)
-    _anchor_resize(size_btn, "size", btn_size, btn_size,
-                   layout.screen_w, layout.screen_h)
-    size_btn.setFixedSize(btn_size, btn_size)
 
 
 def _on_frame(frame: TelemetryFrame, engine: EngineView, wheels: dict[str, WheelView]) -> None:
@@ -231,56 +193,50 @@ def run(argv: list[str] | None = None) -> int:
 
     engine = EngineView()
     wheels = {wid: WheelView(wid) for wid in ("FL", "FR", "RL", "RR")}
-    reset_btn = ResetButton()
-    size_btn = SizeButton()
 
-    # Apply persisted size choice so the first compute_layout uses the
-    # multiplier the user last picked. ``layout`` is rebound by the
-    # size-cycle handler below; lambdas referencing it read the current
-    # value via the closure rather than capturing it by value.
+    # ``size_idx`` and ``layout`` are mutated by the size-cycle handler
+    # below; closures here read the current value via ``nonlocal``.
     size_idx = load_size_index(DEFAULT_SIZE_INDEX, len(SIZE_FACTORS))
-    size_btn.set_index(size_idx)
     base_mult = pick_resolution(geom.height())[1]
     actual_mult = base_mult * SIZE_FACTORS[size_idx]
-    # Pre-size the buttons so _apply_layout's _place uses their final
-    # dimensions when computing the default top-right corner anchor.
-    initial_btn = max(_BUTTON_MIN_PX, int(_BUTTON_BASE_PX * actual_mult))
-    reset_btn.setFixedSize(initial_btn, initial_btn)
-    size_btn.setFixedSize(initial_btn, initial_btn)
     layout = compute_layout(geom.width(), geom.height(), multiplier=actual_mult)
-    _apply_layout(window, engine, wheels, reset_btn, size_btn, layout)
+    _apply_layout(window, engine, wheels, layout)
     window.move(geom.x(), geom.y())
 
-    reset_btn.clicked.connect(lambda: _reset_layout(engine, wheels, layout))
-
-    def _on_size_cycled(idx: int) -> None:
-        nonlocal layout
+    def _set_size(idx: int) -> None:
+        nonlocal size_idx, layout
+        idx = max(0, min(len(SIZE_FACTORS) - 1, int(idx)))
+        size_idx = idx
         save_size_index(idx)
         new_mult = base_mult * SIZE_FACTORS[idx]
         layout = compute_layout(geom.width(), geom.height(), multiplier=new_mult)
-        _resize_widgets(engine, wheels, reset_btn, size_btn, layout, new_mult)
+        _resize_widgets(engine, wheels, layout)
 
-    size_btn.size_changed.connect(_on_size_cycled)
+    def _cycle_size() -> None:
+        _set_size((size_idx + 1) % len(SIZE_FACTORS))
 
-    def _set_size(idx: int) -> None:
-        # Tray-driven set: update the floating button's display so it
-        # stays in lockstep, then run the same resize flow the button
-        # would have triggered.
-        size_btn.set_index(idx)
-        _on_size_cycled(idx)
+    def _do_reset() -> None:
+        _reset_layout(engine, wheels, layout)
 
-    # System-tray icon mirrors the floating reset button, adds a click-
-    # through toggle and a size submenu, and exposes a quit entry. Held
-    # by `window` so it lives as long as the overlay does.
+    # Global hotkeys (registered in window.py via Win32 RegisterHotKey).
+    window.reset_hotkey.connect(_do_reset)
+    window.size_hotkey.connect(_cycle_size)
+
+    # System-tray icon: reset / click-through / size submenu / quit.
+    # Held by ``window`` so it lives as long as the overlay does.
     window._tray = make_tray(
         window,
-        on_reset=lambda: _reset_layout(engine, wheels, layout),
+        on_reset=_do_reset,
         on_toggle_click_through=window.toggle_click_through,
         is_click_through=lambda: window.click_through,
         on_set_size=_set_size,
-        current_size_index=lambda: size_btn.index,
+        current_size_index=lambda: size_idx,
         size_labels=SIZE_LABELS,
         on_quit=app.quit,
+        reset_shortcut=HOTKEY_RESET_LABEL,
+        click_through_shortcut=HOTKEY_TOGGLE_LABEL,
+        size_shortcut=HOTKEY_SIZE_LABEL,
+        quit_shortcut=HOTKEY_QUIT_LABEL,
     )
 
     # Hide the telemetry widgets during the countdown — they reveal when

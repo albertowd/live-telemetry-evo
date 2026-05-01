@@ -3,7 +3,7 @@ from __future__ import annotations
 import ctypes
 import sys
 
-from PySide6.QtCore import Qt, QAbstractNativeEventFilter, QPoint, QTimer
+from PySide6.QtCore import Qt, QAbstractNativeEventFilter, QPoint, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -32,10 +32,20 @@ _MOD_CONTROL = 0x0002
 _MOD_NOREPEAT = 0x4000
 _VK_L = 0x4C
 _VK_Q = 0x51
+_VK_R = 0x52
+_VK_S = 0x53
 
 # Hotkey IDs are app-scoped; any unique small ints work.
 _HK_ID_TOGGLE = 1
 _HK_ID_QUIT = 2
+_HK_ID_RESET = 3
+_HK_ID_SIZE = 4
+
+# Human-readable labels shown next to the matching tray-menu entries.
+HOTKEY_TOGGLE_LABEL = "Ctrl+Alt+L"
+HOTKEY_QUIT_LABEL = "Ctrl+Alt+Q"
+HOTKEY_RESET_LABEL = "Ctrl+Alt+R"
+HOTKEY_SIZE_LABEL = "Ctrl+Alt+S"
 
 if sys.platform != "win32":
     raise OSError("AC Evo Telemetry Overlay is Windows-only")
@@ -145,7 +155,14 @@ class OverlayWindow(QWidget):
     Click-through is toggled with Ctrl+Alt+L. When enabled, mouse events pass
     through to whatever is underneath (e.g. the game). When disabled, the
     window can be dragged with the left mouse button.
+
+    Emits ``reset_hotkey`` / ``size_hotkey`` when the corresponding Win32
+    global hotkey fires; ``app.py`` connects those to the layout-reset and
+    size-cycle handlers so the tray menu and the hotkeys share one path.
     """
+
+    reset_hotkey = Signal()
+    size_hotkey = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -178,6 +195,8 @@ class OverlayWindow(QWidget):
         self._hotkey_filter = _HotkeyFilter()
         self._hotkey_filter.register(_HK_ID_TOGGLE, self.toggle_click_through)
         self._hotkey_filter.register(_HK_ID_QUIT, QApplication.quit)
+        self._hotkey_filter.register(_HK_ID_RESET, self.reset_hotkey.emit)
+        self._hotkey_filter.register(_HK_ID_SIZE, self.size_hotkey.emit)
         QApplication.instance().installNativeEventFilter(self._hotkey_filter)
 
         self.resize(640, 280)
@@ -205,10 +224,12 @@ class OverlayWindow(QWidget):
         mods = _MOD_CONTROL | _MOD_ALT | _MOD_NOREPEAT
         ok_l = _RegisterHotKey(None, _HK_ID_TOGGLE, mods, _VK_L)
         ok_q = _RegisterHotKey(None, _HK_ID_QUIT, mods, _VK_Q)
-        if not ok_l or not ok_q:
+        ok_r = _RegisterHotKey(None, _HK_ID_RESET, mods, _VK_R)
+        ok_s = _RegisterHotKey(None, _HK_ID_SIZE, mods, _VK_S)
+        if not (ok_l and ok_q and ok_r and ok_s):
             err = ctypes.get_last_error()
             print(f"[overlay] RegisterHotKey failed (err={err}); "
-                  f"Ctrl+Alt+L/Q may not work", file=sys.stderr)
+                  f"Ctrl+Alt+L/Q/R/S may not work", file=sys.stderr)
         self._hotkeys_registered = True
 
     def _unregister_hotkeys(self) -> None:
@@ -216,6 +237,8 @@ class OverlayWindow(QWidget):
             return
         _UnregisterHotKey(None, _HK_ID_TOGGLE)
         _UnregisterHotKey(None, _HK_ID_QUIT)
+        _UnregisterHotKey(None, _HK_ID_RESET)
+        _UnregisterHotKey(None, _HK_ID_SIZE)
         self._hotkeys_registered = False
 
     def _reassert_topmost(self) -> None:
