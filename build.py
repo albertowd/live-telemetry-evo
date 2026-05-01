@@ -30,6 +30,7 @@ RES_IMG_DIR = ROOT / "resources" / "img"
 ENTRYPOINT = ROOT / "src" / "overlay" / "__main__.py"
 DIST_DIR = ROOT / "dist"
 BUILD_DIR = ROOT / "build"
+SPEC_FILE = ROOT / "ACEvoOverlay.spec"
 
 
 def _read_version() -> str:
@@ -100,24 +101,20 @@ def main() -> int:
         sys.stderr.write(f"[build] missing entrypoint {ENTRYPOINT}\n")
         return 1
 
+    if not SPEC_FILE.is_file():
+        sys.stderr.write(f"[build] missing spec file {SPEC_FILE}\n")
+        return 1
+    # The spec file owns Analysis / EXE configuration plus the binary
+    # filter that drops Qt6 DLLs we don't use (QtQuick, QtNetwork,
+    # opengl32sw.dll, ...). build.py only handles the icon conversion
+    # and dist-folder cleanup around it.
+    del icon  # consumed by the spec via resources/icon.ico
     cmd = [
         sys.executable, "-m", "PyInstaller", "--noconfirm",
-        "--onefile",
-        "--windowed",
-        "--name", final_name,
-        "--add-data", f"{RES_IMG_DIR};resources/img",
-        "--paths", str(ROOT / "src"),
         "--distpath", str(DIST_DIR),
         "--workpath", str(BUILD_DIR),
-        "--specpath", str(BUILD_DIR),
+        str(SPEC_FILE),
     ]
-    # Bundle the source PNG so the system-tray icon can load it at
-    # runtime -- the embedded .ico (--icon) only sets the EXE icon.
-    if ICON_PNG.exists():
-        cmd.extend(["--add-data", f"{ICON_PNG};resources"])
-    if icon is not None:
-        cmd.extend(["--icon", str(icon)])
-    cmd.append(str(ENTRYPOINT))
 
     print(f"[build] {' '.join(cmd)}")
     rc = subprocess.call(cmd)
