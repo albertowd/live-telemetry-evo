@@ -11,11 +11,12 @@ from .settings import (delete_entries, load_positions, load_size_index,
                         save_visibility)
 from .sources import make_source
 from .telemetry import TelemetryFrame
+from .tray import make_tray
 from .widgets.countdown import CountdownView
 from .widgets.engine_view import EngineView
 from .widgets.reset_button import ResetButton
 from .widgets.size_button import (DEFAULT_SIZE_INDEX, SIZE_FACTORS,
-                                   SizeButton)
+                                   SIZE_LABELS, SizeButton)
 from .widgets.wheel_view import WheelView
 from .window import OverlayWindow
 
@@ -260,6 +261,27 @@ def run(argv: list[str] | None = None) -> int:
         _resize_widgets(engine, wheels, reset_btn, size_btn, layout, new_mult)
 
     size_btn.size_changed.connect(_on_size_cycled)
+
+    def _set_size(idx: int) -> None:
+        # Tray-driven set: update the floating button's display so it
+        # stays in lockstep, then run the same resize flow the button
+        # would have triggered.
+        size_btn.set_index(idx)
+        _on_size_cycled(idx)
+
+    # System-tray icon mirrors the floating reset button, adds a click-
+    # through toggle and a size submenu, and exposes a quit entry. Held
+    # by `window` so it lives as long as the overlay does.
+    window._tray = make_tray(
+        window,
+        on_reset=lambda: _reset_layout(engine, wheels, layout),
+        on_toggle_click_through=window.toggle_click_through,
+        is_click_through=lambda: window.click_through,
+        on_set_size=_set_size,
+        current_size_index=lambda: size_btn.index,
+        size_labels=SIZE_LABELS,
+        on_quit=app.quit,
+    )
 
     # Hide the telemetry widgets during the countdown — they reveal when
     # the countdown finishes (subject to the persisted visibility flag).

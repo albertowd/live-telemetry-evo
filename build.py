@@ -111,6 +111,10 @@ def main() -> int:
         "--workpath", str(BUILD_DIR),
         "--specpath", str(BUILD_DIR),
     ]
+    # Bundle the source PNG so the system-tray icon can load it at
+    # runtime — the embedded .ico (--icon) only sets the EXE icon.
+    if ICON_PNG.exists():
+        cmd.extend(["--add-data", f"{ICON_PNG};resources"])
     if icon is not None:
         cmd.extend(["--icon", str(icon)])
     cmd.append(str(ENTRYPOINT))

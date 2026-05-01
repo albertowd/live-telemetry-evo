@@ -219,8 +219,19 @@ class OverlayWindow(QWidget):
         self._hotkeys_registered = False
 
     def _reassert_topmost(self) -> None:
-        if self.isVisible():
-            _force_topmost(int(self.winId()))
+        # Skip while any popup (e.g. our tray context menu) is open. Popups
+        # sit in the topmost band themselves, so re-asserting HWND_TOPMOST
+        # on the overlay every second would cover the popup and steal the
+        # user's click. The next tick after the popup closes restores us.
+        if not self.isVisible():
+            return
+        if QApplication.activePopupWidget() is not None:
+            return
+        _force_topmost(int(self.winId()))
+
+    @property
+    def click_through(self) -> bool:
+        return self._click_through
 
     def toggle_click_through(self) -> None:
         self._click_through = not self._click_through

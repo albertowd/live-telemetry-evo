@@ -7,22 +7,32 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QPainter, QPixmap
 
 
-def _img_dir() -> Path:
-    """Locate ``resources/img`` whether running from source or frozen.
+def _resources_dir() -> Path:
+    """Locate the ``resources`` directory, frozen-aware.
 
     PyInstaller sets ``sys.frozen`` and unpacks bundled data under
     ``sys._MEIPASS`` (a temp dir for one-file mode, the dist folder for
-    one-folder). The build script copies ``resources/img`` into that
-    same relative path. From a source checkout we fall back to the
-    project tree (``parents[2]`` of this file).
+    one-folder). The build script mirrors the project's ``resources``
+    layout into that same relative path. From a source checkout we fall
+    back to the project tree (``parents[2]`` of this file).
     """
     if getattr(sys, "frozen", False):
         base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-        return base / "resources" / "img"
-    return Path(__file__).resolve().parents[2] / "resources" / "img"
+        return base / "resources"
+    return Path(__file__).resolve().parents[2] / "resources"
 
 
-_IMG_DIR = _img_dir()
+_RES_DIR = _resources_dir()
+_IMG_DIR = _RES_DIR / "img"
+
+
+def app_icon_path() -> Path:
+    """Return the project's app icon (``resources/icon.png``).
+
+    Same file the build script feeds to PyInstaller's ``--icon``, so the
+    tray and the EXE share a single source of truth.
+    """
+    return _RES_DIR / "icon.png"
 
 # Per-icon source pixmaps loaded on demand (full-resolution alpha masks).
 _source_cache: dict[str, QPixmap] = {}
