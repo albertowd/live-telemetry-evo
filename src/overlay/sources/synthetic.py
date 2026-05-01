@@ -77,6 +77,31 @@ class SyntheticTelemetrySource(TelemetrySource):
         e.shift_up_hint = rpm_ratio > 0.93
         e.shift_down_hint = rpm_ratio < 0.20 and throttle > 0.5
 
+        # Phase 1 driver-aid / status chips — driven on slow oscillators
+        # so each chip blinks in/out in the mock view, letting the user
+        # eyeball every code path without a running game.
+        e.esc_active = math.sin(t * 0.42) > 0.85
+        e.launch_active = t < 5.0
+        e.drs_available = math.sin(t * 0.18) > 0.0
+        e.drs_enabled = e.drs_available and throttle > 0.6
+        e.ers_charging = math.sin(t * 0.31) > 0.0
+        e.wrong_way = math.sin(t * 0.05) < -0.97
+        e.valid_lap = math.sin(t * 0.07) > -0.95
+        e.last_lap = math.sin(t * 0.04) > 0.97
+
+        # Phase 2 analog readouts — plausible idle/cruise values that
+        # drift over time so the readout chips are visible and update.
+        e.water_temp_c = 88.0 + math.sin(t * 0.10) * 8.0 + throttle * 6.0
+        e.oil_temp_c = 95.0 + math.sin(t * 0.08) * 12.0 + throttle * 10.0
+        e.oil_pressure_bar = 4.0 + (e.rpm / e.max_rpm) * 1.5
+        e.fuel_pressure_bar = 3.0 + math.sin(t * 0.7) * 0.2
+        e.exhaust_temp_c = 550.0 + throttle * 250.0 + math.sin(t * 0.3) * 30.0
+        e.battery_voltage = 13.6 + math.sin(t * 0.05) * 0.4
+        # Drain ~1 L every 10 s, refill at 50 L when empty so the readout
+        # cycles within a single dev session.
+        e.fuel_liters = max(0.0, 50.0 - (t * 0.1) % 50.0)
+        e.brake_bias = 0.55 + math.sin(t * 0.02) * 0.04
+
         for wid, w in self._frame.wheels.items():
             is_front = wid[0] == "F"
             is_left = wid[1] == "L"

@@ -40,6 +40,24 @@ _source_cache: dict[str, QPixmap] = {}
 # Per-icon scaled greyscale masks, keyed by (name, w, h).
 _scaled_cache: dict[tuple[str, int, int], QPixmap] = {}
 
+# Cached file-existence check, keyed by name. Lets the engine widget
+# decide between drawing an icon and falling back to a text label
+# without hitting the filesystem every frame.
+_exists_cache: dict[str, bool] = {}
+
+
+def has_resource(name: str) -> bool:
+    """Return True if ``resources/img/<name>.png`` exists on disk.
+
+    Cached after the first lookup, so the chip-icon-vs-text fallback in
+    the engine widget doesn't stat the filesystem every paint.
+    """
+    cached = _exists_cache.get(name)
+    if cached is None:
+        cached = (_IMG_DIR / f"{name}.png").is_file()
+        _exists_cache[name] = cached
+    return cached
+
 
 def source_pixmap(name: str) -> QPixmap:
     """Return the full-resolution white-on-transparent source pixmap.

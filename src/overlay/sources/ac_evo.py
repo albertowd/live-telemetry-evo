@@ -659,6 +659,12 @@ class AcEvoTelemetrySource(TelemetrySource):
         # bools in graphics.
         e.tc_in_action = ph.tcInAction != 0
         e.abs_in_action = ph.absInAction != 0
+        # Driver-set values that live in physics rather than graphics.
+        e.brake_bias = float(ph.brakeBias)
+        # AC Evo's `drs` is 0..1 deploy state; treat anything > 0.5 as
+        # "deployed" so the chip's bright-vs-dim differentiation matches
+        # what the driver is actually doing.
+        e.drs_enabled = bool(ph.drsEnabled) or float(ph.drs) > 0.5
 
         braking = ph.brake > 0.0
         abs_modulating = ph.absInAction != 0
@@ -738,6 +744,29 @@ class AcEvoTelemetrySource(TelemetrySource):
             e.rpm_percent = rpm_percent
         e.shift_up_hint = bool(gr.is_change_up_rpm)
         e.shift_down_hint = bool(gr.is_change_down_rpm)
+
+        # Phase 1 — driver-aid / status chips (binary).
+        e.esc_active = bool(gr.esc_active)
+        e.launch_active = bool(gr.launch_active)
+        e.drs_available = bool(gr.is_drs_available)
+        # Either the discrete KERS-charging flag or the broader battery
+        # one is enough to light the ERS chip — different engine types
+        # populate different fields.
+        e.ers_charging = bool(gr.kers_is_charging) or bool(gr.battery_is_charging)
+        e.wrong_way = bool(gr.is_wrong_way)
+        e.valid_lap = bool(gr.is_valid_lap)
+        e.last_lap = bool(gr.is_last_lap)
+
+        # Phase 2 — analog engine readouts. The graphics block stores
+        # water/air temps as int8 °C; cast to float so downstream code
+        # can format uniformly.
+        e.water_temp_c = float(gr.water_temperature_c)
+        e.oil_temp_c = float(gr.oil_temperature_c)
+        e.oil_pressure_bar = float(gr.oil_pressure_bar)
+        e.fuel_pressure_bar = float(gr.fuel_pressure_bar)
+        e.exhaust_temp_c = float(gr.exhaust_temperature_c)
+        e.battery_voltage = float(gr.battery_voltage)
+        e.fuel_liters = float(gr.fuel_liter_current_quantity)
 
         # Per-wheel data published as embedded TyreState blocks:
         #   * lock — game-supplied, replaces the slip/angular-speed

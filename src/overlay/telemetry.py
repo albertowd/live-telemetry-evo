@@ -63,6 +63,26 @@ class EngineData:
     abs_in_action: bool = False
     shift_up_hint: bool = False
     shift_down_hint: bool = False
+    # Phase 1 driver-aid / status chips (binary). All start False so a
+    # source that doesn't publish them simply leaves the chips off.
+    esc_active: bool = False       # stability control engaging
+    launch_active: bool = False    # launch control armed/engaging
+    drs_available: bool = False    # DRS enabled in this zone
+    drs_enabled: bool = False      # driver actually deployed it
+    ers_charging: bool = False     # ERS / KERS / battery currently charging
+    wrong_way: bool = False        # driver going against direction
+    valid_lap: bool = True         # False after a cut invalidates the lap
+    last_lap: bool = False         # final lap of the session
+    # Phase 2 analog engine readouts (negative / zero = "not published");
+    # the engine widget hides the cell when the value is non-positive.
+    water_temp_c: float = 0.0
+    oil_temp_c: float = 0.0
+    oil_pressure_bar: float = 0.0
+    fuel_pressure_bar: float = 0.0
+    exhaust_temp_c: float = 0.0
+    battery_voltage: float = 0.0
+    fuel_liters: float = 0.0
+    brake_bias: float = 0.0        # 0..1, fraction toward the front axle
 
 
 @dataclass

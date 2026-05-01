@@ -5,7 +5,11 @@ from dataclasses import dataclass
 
 # Logical pixel sizes inherited from the original AC plugin.
 ENGINE_LOGICAL_W = 512
-ENGINE_LOGICAL_H = 120
+# Original AC plugin used 120 (boost bar + RPM bar + label + chip strip).
+# We add a 28-px row at the bottom for Phase 2 analog readouts (water /
+# oil temperatures, pressures, fuel, brake bias) — keep this in sync
+# with ``LOGICAL_H`` in ``widgets/engine_view.py``.
+ENGINE_LOGICAL_H = 148
 WHEEL_LOGICAL_W = 512
 WHEEL_LOGICAL_H = 271
 

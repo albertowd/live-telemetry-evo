@@ -108,7 +108,8 @@ multiplies it by your size factor (XS = 0.5 … XL = 1.5).
 ├─────────────────────────── RPM bar ─────────────────────────────┤
 │                                                                 │
 │   1234 HP                  3   148 km/h                7820 RPM │
-│                       PIT      TC       ABS                     │
+│         PIT  TC  ABS  ESC  LC  DRS  ERS  WW  INV  LAST          │
+│  WAT 92°  OIL 110°  OPR 4.5 bar  EXH 720°  FUEL 42L  BIAS 55%F  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -119,7 +120,29 @@ multiplies it by your size factor (XS = 0.5 … XL = 1.5).
 | HP label    | `current_bhp` from the graphics block when available; otherwise the synthesised power curve interpolated at the current RPM, scaled by `(1 + boost)` as a rough boosted-output approximation. |
 | Gear label  | `R` (reverse), `N` (neutral) or the forward gear number — matches AC's `0=R, 1=N, 2+=forward` convention. Speed in km/h sits next to it. |
 | RPM label   | Live engine speed in RPM.                                                             |
-| Aid chips   | `PIT` (yellow) — pit limiter active. `TC` (green) — traction control enabled; **bright when actually cutting**, dim (alpha 0.4) when armed but idle. `ABS` (blue) — same scheme. Chips are hidden when the corresponding aid is disabled (`level == 0`). |
+| Aid chips   | Up to 10 driver-aid / status chips, **only rendered while their condition is true**. The strip auto-compresses when many fire at once so nothing clips: `PIT` (yellow, pit limiter), `TC` (green, traction control — bright when cutting, dim when armed-but-idle), `ABS` (blue, same scheme), `ESC` (red, stability control), `LC` (green, launch control), `DRS` (blue, **bright when deployed**, dim when only available), `ERS` (yellow, kers/battery charging), `WW` (red, wrong way), `INV` (red, lap invalidated by a cut), `LAST` (white, final lap). |
+| Readouts    | Bottom row: `WAT` water temp °C, `OIL` oil temp °C, `OPR` oil pressure bar, `FPR` fuel pressure bar, `EXH` exhaust temp °C, `BAT` battery V, `FUEL` litres, `BIAS` brake bias (%F front). Cells whose source publishes nothing for the current car are hidden so the strip shows only live values. |
+
+#### Icon vs. text fallback (engine bar)
+
+Each chip and readout cell is keyed to an [MDI](https://pictogrammers.com/library/mdi/)
+icon name. Drop a white-on-transparent PNG named `<icon-name>.png` (e.g.
+`car-brake-abs.png`, `water-thermometer.png`) into `resources/img/` and the cell
+renders as a tinted icon; until the file exists it falls back to the text label.
+Icon-name mapping:
+
+| Cell | MDI icon | Cell | MDI icon |
+| --- | --- | --- | --- |
+| PIT | `car-speed-limiter` | WAT | `water-thermometer` |
+| TC  | `car-traction-control` | OIL | `oil-temperature` |
+| ABS | `car-brake-abs` | OPR | `oil-level` |
+| ESC | `car-esp` | FPR | `gas-station` |
+| LC  | `rocket-launch` | EXH | `smoke` |
+| DRS | `car-cruise-control` | BAT | `car-battery` |
+| ERS | `battery-charging` | FUEL | `fuel` |
+| WW  | `alert` | BIAS | `car-brake-parking` |
+| INV | `flag-remove` | | |
+| LAST | `flag-checkered` | | |
 
 ### Wheel widget (one per corner; FL/FR/RL/RR)
 
@@ -176,6 +199,11 @@ Each `TelemetryFrame` carries:
 `abs_level`, `tc_level`, `pit_limiter`, plus AC Evo graphics-block fields when
 available: `current_bhp`, `current_torque`, `rpm_percent`, `tc_in_action`,
 `abs_in_action`, `shift_up_hint`, `shift_down_hint`.
+Phase 1 chips (booleans): `esc_active`, `launch_active`, `drs_available`,
+`drs_enabled`, `ers_charging`, `wrong_way`, `valid_lap`, `last_lap`.
+Phase 2 readouts (zero = not published, hidden): `water_temp_c`, `oil_temp_c`,
+`oil_pressure_bar`, `fuel_pressure_bar`, `exhaust_temp_c`, `battery_voltage`,
+`fuel_liters`, `brake_bias` (0..1, fraction toward the front axle).
 
 **Wheel (×4)** — `tire_t_c`/`tire_t_i`/`tire_t_m`/`tire_t_o` (core / inner / middle /
 outer °C) plus matching per-compound `tire_t_norm_*` (1.0 = ideal), `tire_p` (psi) +

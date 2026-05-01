@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QWidget
 from ..colors import Colors
 from ..fonts import label_font
 from ..interpolation import DEFAULT_TORQUE_CURVE, Power
+from ..resources import has_resource, tinted
 from ..telemetry import EngineData
 from .draggable import DraggableWidget
 
@@ -14,11 +15,22 @@ from .draggable import DraggableWidget
 # Original AC plugin sizes — we paint in this logical coord system and let
 # the widget's actual size scale via QPainter transforms.
 LOGICAL_W = 512.0
-LOGICAL_H = 120.0
+# Bumped from 120 to fit the Phase 2 readouts row at the bottom — keep
+# in sync with ``ENGINE_LOGICAL_H`` in ``layout.py``.
+LOGICAL_H = 148.0
 BOOST_BAR_RECT = QRectF(0.0, 0.0, LOGICAL_W, 24.0)
 RPM_BAR_RECT = QRectF(0.0, 26.0, LOGICAL_W, 50.0)
 LABEL_RECT = QRectF(0.0, 77.0, LOGICAL_W, 22.0)
 AIDS_RECT = QRectF(0.0, 100.0, LOGICAL_W, 20.0)
+READOUTS_RECT = QRectF(0.0, 122.0, LOGICAL_W, 24.0)
+
+# Chip strip cell width. Conservative so up to eight Phase 1 chips fit
+# inside ``LOGICAL_W`` simultaneously (8 × 64 = 512); typical play only
+# shows three or four at once.
+CHIP_W = 64.0
+# Readouts cell width — the strip centres only the populated cells, so
+# this is just per-cell breathing room, not a hard fit constraint.
+READOUT_W = 64.0
 
 
 def _format_gear(gear: int) -> str:
@@ -48,8 +60,9 @@ class EngineView(DraggableWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.TextAntialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        # Scale logical coords (512x120) into the actual widget rect.
+        # Scale logical coords (512x148) into the actual widget rect.
         sx = self.width() / LOGICAL_W
         sy = self.height() / LOGICAL_H
         p.scale(sx, sy)
@@ -94,6 +107,7 @@ class EngineView(DraggableWidget):
         p.drawText(LABEL_RECT, Qt.AlignRight | Qt.AlignVCenter, f"{int(d.rpm)} RPM  ")
 
         self._draw_aids(p, d)
+        self._draw_readouts(p, d)
 
         # Boost bar (only meaningful when the car has a turbo).
         p.fillRect(BOOST_BAR_RECT, Colors.black)
@@ -128,30 +142,142 @@ class EngineView(DraggableWidget):
     def _draw_aids(self, p: QPainter, d: EngineData) -> None:
         """Driver-aid status row.
 
-        Chip colour brightens when the aid is *currently engaging*
-        (tc_in_action / abs_in_action) and dims to alpha 0.4 when the aid
-        is enabled-but-idle. PIT limiter is binary and always drawn fully
-        bright when on.
+        Each chip is ``(label, color, engaging, icon_name)``: the icon is
+        rendered tinted by ``color`` when ``resources/img/<icon_name>.png``
+        exists; otherwise the chip falls back to the text label so a
+        missing icon is visible-but-bounded rather than blank. Chip colour
+        brightens when the aid is *currently engaging* and dims to alpha
+        0.4 when the aid is enabled-but-idle (PIT limiter is binary and
+        always drawn fully bright when on).
         """
-        chips: list[tuple[str, QColor, bool]] = []
+        chips: list[tuple[str, QColor, bool, str]] = []
         if d.pit_limiter:
-            chips.append(("PIT", Colors.yellow, True))
+            chips.append(("PIT", Colors.yellow, True, "car-speed-limiter"))
         if d.tc_level > 0.0:
-            chips.append(("TC", Colors.green, d.tc_in_action))
+            chips.append(("TC", Colors.green, d.tc_in_action, "car-traction-control"))
         if d.abs_level > 0.0:
-            chips.append(("ABS", Colors.blue, d.abs_in_action))
+            chips.append(("ABS", Colors.blue, d.abs_in_action, "car-brake-abs"))
+        if d.esc_active:
+            chips.append(("ESC", Colors.red, True, "car-esp"))
+        if d.launch_active:
+            chips.append(("LC", Colors.green, True, "rocket-launch"))
+        if d.drs_available:
+            # Bright when the driver's actually deployed it; dim while
+            # the zone allows it but the driver hasn't pressed the button.
+            chips.append(("DRS", Colors.blue, d.drs_enabled, "car-cruise-control"))
+        if d.ers_charging:
+            chips.append(("ERS", Colors.yellow, True, "battery-charging"))
+        if d.wrong_way:
+            chips.append(("WW", Colors.red, True, "alert"))
+        if not d.valid_lap:
+            chips.append(("INV", Colors.red, True, "flag-remove"))
+        if d.last_lap:
+            chips.append(("LAST", Colors.white, True, "flag-checkered"))
         if not chips:
             return
 
-        chip_w = 80.0
+        # Compress per-cell width when we'd otherwise overflow the widget;
+        # 10 chips × 64 = 640 > LOGICAL_W. Keep a floor so the icons /
+        # text don't disappear entirely on a worst-case "everything on at
+        # once" frame.
+        chip_w = min(CHIP_W, max(40.0, LOGICAL_W / len(chips)))
         total_w = chip_w * len(chips)
         x = (LOGICAL_W - total_w) / 2.0
-        p.setFont(label_font(16))
-        for label, color, engaging in chips:
+        p.setFont(label_font(14))
+        for label, color, engaging, icon_name in chips:
+            chip_color = QColor(color)
             if not engaging:
-                color = QColor(color)
-                color.setAlphaF(0.4)
-            p.setPen(color)
-            p.drawText(QRectF(x, AIDS_RECT.y(), chip_w, AIDS_RECT.height()),
-                       Qt.AlignCenter, label)
+                chip_color.setAlphaF(0.4)
+            self._draw_chip(p, label, chip_color, icon_name,
+                            QRectF(x, AIDS_RECT.y(), chip_w, AIDS_RECT.height()))
             x += chip_w
+
+    def _draw_chip(self, p: QPainter, label: str, color: QColor,
+                   icon_name: str, rect: QRectF) -> None:
+        """Render a chip — tinted icon when the PNG is on disk, otherwise
+        the text label centred in the cell. This way the rendering path
+        is the same whether or not the user has dropped the icon PNG into
+        ``resources/img/`` yet."""
+        if has_resource(icon_name):
+            # Square the icon vertically so the PNG draws as a centred
+            # sprite inside the chip cell, padded slightly so adjacent
+            # icons don't touch.
+            side = max(8.0, rect.height() - 2.0)
+            ix = rect.x() + (rect.width() - side) / 2.0
+            iy = rect.y() + (rect.height() - side) / 2.0
+            pix = tinted(icon_name, int(side), int(side), color)
+            p.drawPixmap(QRectF(ix, iy, side, side).topLeft(), pix)
+            return
+        p.setPen(color)
+        p.drawText(rect, Qt.AlignCenter, label)
+
+    def _draw_readouts(self, p: QPainter, d: EngineData) -> None:
+        """Phase 2 analog readouts row.
+
+        Each populated cell is ``label + value + unit`` (text-only until
+        the matching MDI PNG lands in ``resources/img/``; once present
+        the icon replaces the label inline). Cells with non-positive
+        values are hidden so a car/source that doesn't publish a given
+        field doesn't leave dead space in the strip.
+        """
+        cells: list[tuple[str, str, str]] = []  # (icon_name, label, value+unit)
+        if d.water_temp_c > 0.0:
+            cells.append(("water-thermometer", "WAT", f"{int(d.water_temp_c)}°C"))
+        if d.oil_temp_c > 0.0:
+            cells.append(("oil-temperature", "OIL", f"{int(d.oil_temp_c)}°C"))
+        if d.oil_pressure_bar > 0.0:
+            cells.append(("oil-level", "OILP", f"{d.oil_pressure_bar:.1f}bar"))
+        if d.fuel_pressure_bar > 0.0:
+            cells.append(("gas-station", "FUELP", f"{d.fuel_pressure_bar:.1f}bar"))
+        if d.exhaust_temp_c > 0.0:
+            cells.append(("smoke", "EXH", f"{int(d.exhaust_temp_c)}°C"))
+        if d.battery_voltage > 0.0:
+            cells.append(("car-battery", "BAT", f"{d.battery_voltage:.1f}V"))
+        if d.fuel_liters > 0.0:
+            cells.append(("fuel", "FUEL", f"{d.fuel_liters:.0f}L"))
+        if d.brake_bias > 0.0:
+            cells.append(("car-brake-parking", "BBIAS", f"{int(d.brake_bias * 100)}%F"))
+        if not cells:
+            return
+
+        # Same compression rule as the chip strip — never let the row
+        # exceed LOGICAL_W, never collapse below a readable floor.
+        cell_w = min(READOUT_W, max(48.0, LOGICAL_W / len(cells)))
+        total_w = cell_w * len(cells)
+        x = (LOGICAL_W - total_w) / 2.0
+        for icon_name, label, value in cells:
+            self._draw_readout(p, icon_name, label, value,
+                               QRectF(x, READOUTS_RECT.y(),
+                                      cell_w, READOUTS_RECT.height()))
+            x += cell_w
+
+    def _draw_readout(self, p: QPainter, icon_name: str, label: str,
+                      value: str, rect: QRectF) -> None:
+        """Render one readout cell: icon (or label) on the left, value on
+        the right. Icon is tinted white; the value is white too, sized to
+        fit the 24-px row."""
+        icon_w = 0.0
+        if has_resource(icon_name):
+            side = max(10.0, rect.height() - 4.0)
+            ix = rect.x() + 2.0
+            iy = rect.y() + (rect.height() - side) / 2.0
+            pix = tinted(icon_name, int(side), int(side), Colors.white)
+            p.drawPixmap(QRectF(ix, iy, side, side).topLeft(), pix)
+            icon_w = side + 4.0
+        else:
+            # Text fallback: small dim label in the icon's slot. Same width
+            # budget so the value still lines up across cells.
+            label_w = rect.width() * 0.45
+            label_color = QColor(Colors.white)
+            label_color.setAlphaF(0.55)
+            p.setPen(label_color)
+            p.setFont(label_font(10))
+            p.drawText(QRectF(rect.x() + 2.0, rect.y(), label_w, rect.height()),
+                       Qt.AlignLeft | Qt.AlignVCenter, label)
+            icon_w = label_w
+
+        p.setPen(Colors.white)
+        p.setFont(label_font(11))
+        p.drawText(QRectF(rect.x() + icon_w, rect.y(),
+                          rect.width() - icon_w - 2.0, rect.height()),
+                   Qt.AlignRight | Qt.AlignVCenter, value)
