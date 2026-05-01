@@ -1,0 +1,69 @@
+name: Release
+
+# Fires when a version tag is pushed (e.g. ``git tag v0.5.0 && git push --tags``).
+# Builds the Windows one-file executable via ``python build.py`` and publishes
+# a GitHub Release with the resulting ``ACEvoOverlay-<version>.exe`` attached.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# softprops/action-gh-release needs write access to the repo's Releases.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows executable
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Verify artifact
+        # Fail fast if build.py reported success but no .exe ended up in dist/.
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path dist -Filter 'ACEvoOverlay-*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'no ACEvoOverlay-*.exe in dist/' }
+          Write-Host "built $($exe.Name) ($([math]::Round($exe.Length / 1MB, 1)) MB)"
+
+      - name: Compute SHA256 checksum
+        # Lets users verify their download against the release notes.
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path dist -Filter 'ACEvoOverlay-*.exe' | Select-Object -First 1
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $exe.FullName).Hash.ToLower()
+          "$hash  $($exe.Name)" | Out-File -FilePath dist/SHA256SUMS.txt -Encoding ASCII
+
+      - name: Extract changelog section
+        # Pulls the matching ``## [<version>]`` section body out of
+        # CHANGELOG.md so the release notes lead with curated highlights;
+        # the auto-generated commit/PR list is appended below by softprops.
+        run: python tools/extract_changelog.py "${{ github.ref_name }}" release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ACEvoOverlay-*.exe
+            dist/SHA256SUMS.txt
+          body_path: release_notes.md
+          # Auto-generated PR/commit list is appended after ``body_path``.
+          generate_release_notes: true
+          fail_on_unmatched_files: true

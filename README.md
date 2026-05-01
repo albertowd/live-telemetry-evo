@@ -294,6 +294,28 @@ Requires the dev extras:
 pip install -r requirements-dev.txt
 ```
 
+### Cutting a release (CI)
+
+`.github/workflows/release.yml` runs on every `v*` tag push. It uses
+`windows-latest` to run `python build.py`, then publishes a GitHub Release
+with the resulting `ACEvoOverlay-<version>.exe` plus a `SHA256SUMS.txt`
+attached. The release body is built from two parts: the matching
+`## [<version>]` section of [`CHANGELOG.md`](CHANGELOG.md) (extracted by
+`tools/extract_changelog.py`), followed by the auto-generated PR/commit
+list since the previous tag.
+
+```bash
+# 1. Bump version in pyproject.toml.
+# 2. Add the new ## [X.Y.Z] section to CHANGELOG.md (Keep a Changelog format).
+# 3. Tag and push.
+git tag v0.5.0
+git push origin v0.5.0
+```
+
+The release page populates a couple of minutes later — no manual upload
+needed. If the changelog has no matching section the workflow still ships
+a release, with a placeholder body noting the missing entry.
+
 ---
 
 ## Inspecting live shared memory
