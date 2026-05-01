@@ -130,6 +130,11 @@ class WheelView(DraggableWidget):
         core_color.setAlphaF(0.85)
         p.setPen(Qt.NoPen)
         p.setBrush(core_color)
+        # Disable AA for the temp grid: columns are 136/3 ≈ 45.33 logical px
+        # wide and the painter has a non-integer scale(), so anti-aliased
+        # edges on adjacent rects leave semi-transparent seams between
+        # colors. Aliased rects snap consistently and meet flush.
+        p.setRenderHint(QPainter.Antialiasing, False)
         p.drawRect(QRectF(inner_x, top_y + quarter, part * 3.0, quarter * 6.0))
 
         for value, norm, x in (
@@ -141,6 +146,7 @@ class WheelView(DraggableWidget):
             p.setBrush(c)
             p.drawRect(QRectF(x, top_y, part, quarter))
             p.drawRect(QRectF(x, top_y + quarter * 7.0, part, quarter))
+        p.setRenderHint(QPainter.Antialiasing, True)
 
     def _draw_dirt(self, p: QPainter, d: WheelData) -> None:
         full = QRectF(188.0, 128.0, 136.0, 116.0)
