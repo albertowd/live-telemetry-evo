@@ -704,7 +704,14 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.abs_active = abs_modulating and braking and not w.lock and slip > 0.10
 
             w.camber = float(ph.camberRAD[idx])
-            w.susp_t = float(ph.suspensionTravel[idx])
+            # Most AC Evo cars publish suspensionTravel as positive metres
+            # from full extension. Some (notably cars with active /
+            # electronically managed suspension) publish a signed
+            # displacement around a static reference instead — values
+            # cluster around -0.03 at rest and swing a couple of cm on
+            # kerbs. Take the magnitude so both conventions calibrate and
+            # render identically.
+            w.susp_t = abs(float(ph.suspensionTravel[idx]))
             # AC Evo no longer publishes the per-car suspensionMaxTravel,
             # so we calibrate susp_m_t from observation. Cars span a wide
             # range (~0.04 m on a GT3 to >0.15 m on a road car), so the
