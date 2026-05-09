@@ -316,21 +316,32 @@ class WheelView(DraggableWidget):
         p.drawText(label_rect, Qt.AlignCenter, f"{int(d.brake_t)} °C")
 
     def _draw_brake_wear(self, p: QPainter, d: WheelData) -> None:
-        """Two thin vertical bars flanking the brake icon: outer = pad
-        life ("P"), inner = disc life ("D"). Self-calibrated against the
-        per-wheel max observed since session start."""
+        """Horizontal disc/pad wear bars in the gap between the brake-
+        temperature label and the pressure icon. Each row has a centred
+        title and a left→right fill (full bar = fresh). Self-calibrated
+        against the per-wheel max observed since session start, since
+        AC EVO's padLife / discLife raw scale isn't pinned down."""
         self._pad_w_max = max(self._pad_w_max, d.pad_w)
         self._disc_w_max = max(self._disc_w_max, d.disc_w)
 
-        bar_w = 8.0
-        bar_h = 60.0
-        letter_h = 14.0
+        bar_x = self._x_left(70.0, 60.0)
+        bar_w = 60.0
+        bar_h = 12.0
+        title_h = 12.0
+        title_rect_x = self._x_left(50.0, 100.0)
+        title_rect_w = 100.0
 
-        for x_logical, value, max_obs, label in (
-            (58.0, d.pad_w, self._pad_w_max, "P"),
-            (136.0, d.disc_w, self._disc_w_max, "D"),
-        ):
-            rect = QRectF(self._x_left(x_logical, bar_w), 0.0, bar_w, bar_h)
+        rows = (
+            ("Disk Wear", d.disc_w, self._disc_w_max, 90.0),
+            ("Pads Wear", d.pad_w, self._pad_w_max, 122.0),
+        )
+        for title, value, max_obs, row_y in rows:
+            p.setFont(label_font(10))
+            p.setPen(Colors.white)
+            p.drawText(QRectF(title_rect_x, row_y, title_rect_w, title_h),
+                       Qt.AlignCenter, title)
+
+            rect = QRectF(bar_x, row_y + title_h + 2.0, bar_w, bar_h)
             p.setPen(QPen(Colors.white, 1.5))
             p.setBrush(Colors.black)
             p.drawRect(rect)
@@ -344,23 +355,12 @@ class WheelView(DraggableWidget):
             else:
                 color = Colors.red
 
-            # Fill area sits below the letter cap so the "P"/"D" stays
-            # readable even on a fresh, fully-filled bar.
-            inner_top = rect.y() + letter_h
-            inner_h = rect.bottom() - 2.0 - inner_top
-            fill_h = ratio * inner_h
-            fill_rect = QRectF(rect.x() + 1.5,
-                               rect.bottom() - 2.0 - fill_h,
-                               rect.width() - 3.0,
-                               fill_h)
+            inner = rect.adjusted(1.5, 1.5, -1.5, -1.5)
+            fill_w = ratio * inner.width()
+            fill_rect = QRectF(inner.x(), inner.y(), fill_w, inner.height())
             p.setPen(Qt.NoPen)
             p.setBrush(color)
             p.drawRect(fill_rect)
-
-            p.setFont(label_font(10))
-            p.setPen(Colors.white)
-            letter_rect = QRectF(rect.x(), rect.y(), rect.width(), letter_h)
-            p.drawText(letter_rect, Qt.AlignCenter, label)
 
     def _draw_pressure(self, p: QPainter, d: WheelData) -> None:
         rect = QRectF(self._x_left(70.0, 60.0), 171.0, 60.0, 60.0)
