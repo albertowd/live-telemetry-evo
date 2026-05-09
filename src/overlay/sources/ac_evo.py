@@ -43,6 +43,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer
 
+from ..interpolation import Curve, DEFAULT_BRAKE_TEMP_CURVE
 from ..telemetry import TelemetryFrame, WHEEL_IDS
 from .base import TelemetrySource
 
@@ -588,6 +589,14 @@ class AcEvoTelemetrySource(TelemetrySource):
         super().__init__(parent)
         self._reader = AcEvoSharedMemoryReader()
         self._frame = TelemetryFrame()
+        # Curve fallback for brake_t_norm. AC EVO publishes
+        # `brake_normalized_temperature` only intermittently — it's 0.0
+        # for many cars / states, especially early in a session — and a
+        # 0.0 read leaves brake_t_norm at its default 1.0 (which the
+        # widget reads as "ideal", i.e. green). We interpolate the same
+        # curve the synthetic source uses so the icon reads correctly
+        # whenever the live norm is unavailable.
+        self._brake_curve = Curve(DEFAULT_BRAKE_TEMP_CURVE)
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -872,6 +881,14 @@ class AcEvoTelemetrySource(TelemetrySource):
                 w.tire_t_o = float(outer_temp)
             if ts.data.brake_normalized_temperature > 0.0:
                 w.brake_t_norm = float(ts.data.brake_normalized_temperature)
+            else:
+                # AC EVO leaves this at 0.0 for cars / states it doesn't
+                # compute — without a fallback the field would stick at
+                # its default 1.0 and paint the icon green at any disc
+                # temperature. Use the prior frame's raw brake_t (one
+                # ~16 ms tick stale, irrelevant at brake-temp dynamics)
+                # against the same curve the synthetic source uses.
+                w.brake_t_norm = self._brake_curve.interpolate(w.brake_t)
 
         # Tyre compound names — duplicated across all 4 TyreStates, so we
         # read them once. ctypes c_char arrays come back as null-padded

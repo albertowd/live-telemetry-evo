@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-09
+
+### Added
+- **Brake-pad / disc wear bars** on each wheel widget. Two horizontal bars
+  (titled `Disk Wear` / `Pads Wear`) sit between the brake-temperature
+  label and the pressure icon, fill left → right with green / yellow / red
+  colour bands, and self-calibrate against the per-wheel max observed
+  since session start (AC EVO's `padLife` / `discLife` raw scale isn't
+  pinned down, so "max seen" stands in for "fresh").
+- New `pad_w` / `disc_w` fields on `WheelData`, populated from
+  `ph.padLife[idx]` / `ph.discLife[idx]`. The synthetic source decays
+  both proportional to brake input (pad faster than disc, fronts faster
+  than rears) so dev mode animates the bars.
+- **Per-zone temperature readouts** on the tyre silhouette: inner /
+  middle / outer values in the top bumps and the core value in the
+  centre. Text colour flips black or white based on the patch's Rec. 601
+  luminance, so the reading stays legible across the cold-blue → ideal-
+  green → hot-red sweep.
+
+### Changed
+- Brake icon no longer clip-shrinks with disc temperature. Temperature
+  drives only the icon's tint — the icon is drawn at full size and wear
+  is now conveyed by the new dedicated bars instead of being conflated
+  with a transient temperature signal.
+
+### Fixed
+- Per-face tyre temperatures (`tire_t_i` / `tire_t_m` / `tire_t_o`) read
+  as 0 °C on AC EVO. The legacy AC1 `ph.tyreTempI/M/O` slots are dead on
+  EVO; the values now come from the graphics-block TyreState
+  (`tyre_temperature_left/center/right`) with the same left/right side
+  mirroring already used for the normalised temps.
+- Brake icon stayed green at any disc temperature on AC EVO — the source
+  only updated `brake_t_norm` when `brake_normalized_temperature > 0.0`,
+  and EVO leaves that at 0.0 for many cars / states. The field stuck at
+  its default 1.0 ("ideal") and the curve-driven blue / green / red
+  banding never kicked in. The source now falls back to interpolating
+  the brake curve from the raw `brake_t` whenever the live norm is
+  missing, matching the synthetic-source behaviour.
+
 ## [0.5.0] - 2026-05-01
 
 ### Added
@@ -51,5 +90,6 @@ adheres to [Semantic Versioning](https://semver.org/).
   icon resolves at runtime (previously only the embedded `.ico` was set,
   so the tray was iconless in the frozen build).
 
-[Unreleased]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/albertowd/live-telemetry-ac-evo/releases/tag/v0.5.0

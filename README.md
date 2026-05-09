@@ -176,30 +176,30 @@ Right-side wheels are mirrored so the *outer* edge always faces the screen edge.
 icons are tinted PNGs cached as alpha masks and re-coloured every frame.
 
 ```
-┌──────────────────────────────────────────┐ FL
-│ wear │  brake │   tire silhouette  │ susp│
-│ bar  │   60×60│   + temp grid      │  bar│
-│      │        │   + dirt overlay   │     │
-│      │        │   + load circle    │     │
-│      │  pres- │                    │ ride│
-│      │  sure  │                    │ hght│
-│      │  60×60 │   ── camber strip ─│     │
-└──────────────────────────────────────────┘
-       80 °C       (FL / SOF)         32 mm
-       26.4 psi
+┌────────────────────────────────────────┐ FL
+│  brake  │   tire silhouette   │  susp  │
+│  60×60  │   + temp grid (°C)  │   bar  │
+│  80 °C  │   + dirt overlay    │        │
+│ Disk ▓░ │   + load circle     │        │
+│ Pads ▓░ │                     │  ride  │
+│  pres-  │                     │  hght  │
+│  sure   │                     │        │
+│  60×60  │  ── camber strip ── │        │
+└────────────────────────────────────────┘
+   26.4 psi      (FL / SOF)       32 mm
 ```
 
 | Element               | What it shows                                                                                                                                                                                                                                |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Tire silhouette       | Tinted by **composite tyre temperature**: 75 % core + 25 % average of inner/middle/outer. The colour tracks the per-compound normalised temperature when the source publishes it (1.0 = on target), so the band stays correct across compounds. |
-| Inner / middle / outer temp grid | Three columns, each with a top and a bottom rectangle, coloured by that face's temperature. Lets you spot a single-edge overheat (camber too aggressive) or one-corner cooking. |
-| Core temp band        | Central horizontal band over the silhouette, alpha 85 %, coloured by core temperature. |
+| Inner / middle / outer temp grid | Three columns, each with a top and a bottom rectangle, coloured by that face's temperature. The top bumps additionally show the value in °C; text colour automatically flips black or white per Rec. 601 luminance so the readout stays legible across the cold-blue → green → hot-red sweep. Lets you spot a single-edge overheat (camber too aggressive) or one-corner cooking. |
+| Core temp band        | Central horizontal band over the silhouette, alpha 85 %, coloured by core temperature, with the core value in °C drawn at the centre (same luminance-based black/white text rule). |
 | Dirt overlay          | Brown rectangle that grows from the bottom of the silhouette. `tire_d` is clamped to 0…4; full overlay = wheel is filthy. |
 | Tyre-load circle      | White ring centred on the silhouette. Diameter scales linearly with vertical wheel load: **0.049 px / N**, clamped to 40…256 px. A typical static corner load (~3 000 N) fills the inner half; the ring saturates around ~5 200 N. |
 | Camber strip          | A trapezoidal strip below the silhouette. The horizontal edge stays flat; the top edge tilts proportional to `tan(camber_rad) × strip_width`, so heavy negative camber leans inward and positive camber leans outward. Visual only — there is no numeric readout. |
 | Suspension bar        | Tinted suspension graphic on the **outer** side of the wheel. The colour band reflects how close to the bump-stops you are: white = mid-travel, **yellow** outside ±10 % of the calibrated max, **red** outside ±5 %. The inner fill is the original AC plugin convention — the bar **fills at full extension and shrinks as the suspension compresses** (height ∝ `1 − travel_ratio`). Counter-intuitive vs a typical "load grows" gauge but kept for parity. The max travel auto-calibrates from observation, since AC Evo no longer publishes a per-car `suspensionMaxTravel`. |
-| Wear bar              | Thin vertical bar on the **inner** side. AC Evo's wear scale is small (1.0 = fresh) and the tyre is past its performance cliff well before 0.85, so the bar maps the **usable 0.93 → 1.00 range** to its full height — an empty bar means "pit now", not "5 % left somewhere". Green > 0.98, yellow > 0.95, red below. |
 | Brake icon (top-inner)| Tinted by **brake disc temperature** (curve peak ≈ 400 °C; cold below ~150 °C and hot above ~600 °C reduce stopping power). Per-wheel **lock** triggers a 0.5 s yellow blink; **ABS modulating on this wheel** triggers a continuous blue blink. The °C label below the icon stays in the temperature-tint colour for legibility. |
+| Disk / Pads wear bars | Two horizontal bars in the brake column between the brake-temperature label and the pressure icon, titled **`Disk Wear`** and **`Pads Wear`**. Each fills left → right (full bar = fresh) with green > 50 % life, yellow > 20 %, red below. Self-calibrated against the per-wheel max observed since session start, since AC EVO's `padLife` / `discLife` raw scale isn't pinned down — "max seen" stands in for "fresh", so the bar starts full and only shrinks. |
 | Pressure icon (mid-inner) | Tinted by **normalised pressure** (1.0 = ideal cold pressure for the current compound). Bands sit tight: green within ±0.02 of 1.0, lerp through 0.01, then solid blue (under) or red (over). The label is the **raw psi value**. |
 | Ride-height icon (outer-bottom) | White most of the time. Drops to red for 0.5 s when the height falls below 20 mm (bottoming-out warning). Label in mm. AC Evo cars publish per-axle ride height in metres for some cars and millimetres for others — the source auto-detects: any value with `|height| ≥ 1.0` is treated as mm, otherwise it's metres × 1000. |
 | Wheel ID + compound   | `FL` / `FR` / `RL` / `RR` and, below it, the first three uppercase chars of the active compound (`SOF`, `MED`, `HAR`, `INT`, `WET`). |
@@ -308,8 +308,8 @@ list since the previous tag.
 # 1. Bump version in pyproject.toml.
 # 2. Add the new ## [X.Y.Z] section to CHANGELOG.md (Keep a Changelog format).
 # 3. Tag and push.
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.1
+git push origin v0.5.1
 ```
 
 The release page populates a couple of minutes later — no manual upload
