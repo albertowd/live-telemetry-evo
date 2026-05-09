@@ -170,6 +170,12 @@ class SyntheticTelemetrySource(TelemetrySource):
                 w.tire_d = min(4.0, w.tire_d + 0.5)
 
             w.tire_w = max(0.94, w.tire_w - self._dt * 0.0003)
+            # Brake pad/disc wear: pad decays faster than disc and fronts
+            # decay faster than rears, mirroring AC EVO's observed pattern.
+            pad_rate = 0.0008 if is_front else 0.0004
+            disc_rate = 0.0003 if is_front else 0.00015
+            w.pad_w = max(0.0, w.pad_w - brake * self._dt * pad_rate)
+            w.disc_w = max(0.0, w.disc_w - brake * self._dt * disc_rate)
 
             brake_heat_in = brake * (3.0 if is_front else 1.5)
             brake_cool = 0.4

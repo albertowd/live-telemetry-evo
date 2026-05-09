@@ -25,9 +25,14 @@ LOGICAL_H = 271.0
 WARNING_TIME_S = 0.5
 LOCK_BLINK_PERIOD_S = 0.1
 # Tire-load circle: pixels of diameter per Newton. Calibrated so a
-# typical static wheel load (~3000 N) fills the inner half of the
-# 256 px tire silhouette and saturates around ~5200 N.
-LOAD_PX_PER_N = 0.049
+# typical static wheel load (~3 kN) fills roughly half of the 160 px
+# tire silhouette, and the circle saturates at the full tire width on
+# heavy braking / cornering loads (~6 kN). At this ratio the diameter
+# scales linearly with load through almost the entire useful range —
+# the upper clamp in `_draw_load` only kicks in on extreme hits like
+# kerb strikes, so under normal driving the circle is an accurate
+# load-magnitude indicator at every moment.
+LOAD_PX_PER_N = 0.027
 
 
 def _draw_tinted(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
@@ -59,6 +64,14 @@ class WheelView(DraggableWidget):
         self._height_warn_until = 0.0
         self._lock_warn_until = 0.0
         self._lock_blink_t = 0.0
+        # Per-wheel high-water marks for brake-pad / disc life. AC EVO's
+        # padLife / discLife use AC1's "1.0 = fresh, 0.0 = dead" semantic
+        # but the absolute scale isn't pinned down (see ac_evo.py near the
+        # field declarations), so the wear bars normalise against the max
+        # value seen this session — guarantees a full bar at session start
+        # and monotonic shrinkage from there.
+        self._pad_w_max = 0.0
+        self._disc_w_max = 0.0
         self._last_paint = time.monotonic()
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
@@ -95,8 +108,12 @@ class WheelView(DraggableWidget):
         self._draw_dirt(p, d)
         self._draw_camber(p, d)
         self._draw_suspension(p, d)
-        self._draw_wear(p, d)
+        # Wear bar hidden: AC EVO doesn't publish tyre wear via shared
+        # memory (three independent investigations, see SHARED_MEMORY.md
+        # §9.1). Re-enable this call if/when Kunos starts publishing it.
+        # self._draw_wear(p, d)
         self._draw_lock(p, d, delta_t)
+        self._draw_brake_wear(p, d)
         self._draw_pressure(p, d)
         self._draw_height(p, d)
         self._draw_load(p, d)  # last, on top
@@ -254,6 +271,11 @@ class WheelView(DraggableWidget):
             color = temp_color
             self._lock_blink_t = 0.0
 
+        # Disc temperature drives the *tint* (set above) only. The icon
+        # itself is drawn at full size — pad/disc wear bars beside the
+        # icon convey life remaining, which previously tried to live in
+        # this same icon via a temperature-based clip and conflated the
+        # two signals.
         _draw_tinted(p, "brake", rect, color)
 
         # Disc temperature label below the icon, always in the temp-tint
@@ -264,6 +286,53 @@ class WheelView(DraggableWidget):
         label_rect = QRectF(rect.x() - 20.0, rect.bottom() + 2.0,
                             rect.width() + 40.0, 22.0)
         p.drawText(label_rect, Qt.AlignCenter, f"{int(d.brake_t)} °C")
+
+    def _draw_brake_wear(self, p: QPainter, d: WheelData) -> None:
+        """Two thin vertical bars flanking the brake icon: outer = pad
+        life ("P"), inner = disc life ("D"). Self-calibrated against the
+        per-wheel max observed since session start."""
+        self._pad_w_max = max(self._pad_w_max, d.pad_w)
+        self._disc_w_max = max(self._disc_w_max, d.disc_w)
+
+        bar_w = 8.0
+        bar_h = 60.0
+        letter_h = 14.0
+
+        for x_logical, value, max_obs, label in (
+            (58.0, d.pad_w, self._pad_w_max, "P"),
+            (136.0, d.disc_w, self._disc_w_max, "D"),
+        ):
+            rect = QRectF(self._x_left(x_logical, bar_w), 0.0, bar_w, bar_h)
+            p.setPen(QPen(Colors.white, 1.5))
+            p.setBrush(Colors.black)
+            p.drawRect(rect)
+
+            ratio = (value / max_obs) if max_obs > 0.0 else 1.0
+            ratio = max(0.0, min(1.0, ratio))
+            if ratio > 0.5:
+                color = Colors.green
+            elif ratio > 0.2:
+                color = Colors.yellow
+            else:
+                color = Colors.red
+
+            # Fill area sits below the letter cap so the "P"/"D" stays
+            # readable even on a fresh, fully-filled bar.
+            inner_top = rect.y() + letter_h
+            inner_h = rect.bottom() - 2.0 - inner_top
+            fill_h = ratio * inner_h
+            fill_rect = QRectF(rect.x() + 1.5,
+                               rect.bottom() - 2.0 - fill_h,
+                               rect.width() - 3.0,
+                               fill_h)
+            p.setPen(Qt.NoPen)
+            p.setBrush(color)
+            p.drawRect(fill_rect)
+
+            p.setFont(label_font(10))
+            p.setPen(Colors.white)
+            letter_rect = QRectF(rect.x(), rect.y(), rect.width(), letter_h)
+            p.drawText(letter_rect, Qt.AlignCenter, label)
 
     def _draw_pressure(self, p: QPainter, d: WheelData) -> None:
         rect = QRectF(self._x_left(70.0, 60.0), 171.0, 60.0, 60.0)
@@ -295,12 +364,15 @@ class WheelView(DraggableWidget):
         p.drawText(text_rect, Qt.AlignCenter, f"{d.height:.1f} mm")
 
     def _draw_load(self, p: QPainter, d: WheelData) -> None:
-        # The load circle stays centred over the tire and grows with load.
-        # Cap the diameter at the tire silhouette's width (160 px) so a
-        # heavy hit can't bulge the circle past the rubber it's
-        # describing.
+        # The load circle stays centred over the tire. Diameter scales
+        # linearly with load up to the tire silhouette's width (160 px);
+        # no minimum floor, so a wheel that goes light or off the ground
+        # accurately shrinks toward zero rather than holding a fake
+        # "minimum size" floor.
         center = QPointF(256.0, 128.0)
-        diameter = max(40.0, min(160.0, d.tire_l * LOAD_PX_PER_N))
+        diameter = max(0.0, min(160.0, d.tire_l * LOAD_PX_PER_N))
+        if diameter < 1.0:
+            return
         rect = QRectF(center.x() - diameter / 2.0,
                       center.y() - diameter / 2.0,
                       diameter, diameter)

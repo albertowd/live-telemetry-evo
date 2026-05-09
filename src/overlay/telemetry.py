@@ -35,6 +35,12 @@ class WheelData:
     tire_t_norm_o: float = 1.0
     brake_t_norm: float = 1.0  # brake disc / ideal for current pad+disc
     tire_w: float = 1.0       # wear 0..1 (1 = new)
+    # Brake pad / disc life remaining. AC EVO publishes these via
+    # ph.padLife / ph.discLife with AC1 semantics (1.0 = fresh, decreasing
+    # toward 0.0 = dead); the absolute scale is unclear, so the widget
+    # self-calibrates against the per-wheel max it has seen this session.
+    pad_w: float = 1.0
+    disc_w: float = 1.0
 
 
 @dataclass

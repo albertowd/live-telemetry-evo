@@ -760,6 +760,8 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.tire_t_m = float(ph.tyreTempM[idx])
             w.tire_t_o = float(ph.tyreTempO[idx])
             w.brake_t = float(ph.brakeTemp[idx])
+            w.pad_w = float(ph.padLife[idx])
+            w.disc_w = float(ph.discLife[idx])
             # Tyre wear is currently *unsourced* on AC EVO. The documented
             # offset 120 (`tyreWear`) reads 0.0 all session, and the
             # 740..771 block we briefly mistook for wear turned out to be
