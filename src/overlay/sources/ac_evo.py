@@ -756,9 +756,10 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.tire_l = float(ph.wheelLoad[idx])  # Newtons
             w.tire_p = float(ph.wheelsPressure[idx])
             w.tire_t_c = float(ph.tyreCoreTemperature[idx])
-            w.tire_t_i = float(ph.tyreTempI[idx])
-            w.tire_t_m = float(ph.tyreTempM[idx])
-            w.tire_t_o = float(ph.tyreTempO[idx])
+            # Per-face I/M/O temperatures live in the graphics-block
+            # TyreState (tyre_temperature_left/center/right) — the legacy
+            # AC1 ph.tyreTempI/M/O slots read 0.0 on AC EVO, so populating
+            # tire_t_i/m/o here would just clobber the graphics values.
             w.brake_t = float(ph.brakeTemp[idx])
             w.pad_w = float(ph.padLife[idx])
             w.disc_w = float(ph.discLife[idx])
@@ -850,15 +851,25 @@ class AcEvoTelemetrySource(TelemetrySource):
                 w.tire_t_norm_c = float(ts.data.tyre_normalized_temperature_core)
             if ts.data.tyre_normalized_temperature_center > 0.0:
                 w.tire_t_norm_m = float(ts.data.tyre_normalized_temperature_center)
+            if ts.data.tyre_temperature_center > 0.0:
+                w.tire_t_m = float(ts.data.tyre_temperature_center)
             is_left = wid[1] == "L"
             inner_norm = (ts.data.tyre_normalized_temperature_right if is_left
                           else ts.data.tyre_normalized_temperature_left)
             outer_norm = (ts.data.tyre_normalized_temperature_left if is_left
                           else ts.data.tyre_normalized_temperature_right)
+            inner_temp = (ts.data.tyre_temperature_right if is_left
+                          else ts.data.tyre_temperature_left)
+            outer_temp = (ts.data.tyre_temperature_left if is_left
+                          else ts.data.tyre_temperature_right)
             if inner_norm > 0.0:
                 w.tire_t_norm_i = float(inner_norm)
             if outer_norm > 0.0:
                 w.tire_t_norm_o = float(outer_norm)
+            if inner_temp > 0.0:
+                w.tire_t_i = float(inner_temp)
+            if outer_temp > 0.0:
+                w.tire_t_o = float(outer_temp)
             if ts.data.brake_normalized_temperature > 0.0:
                 w.brake_t_norm = float(ts.data.brake_normalized_temperature)
 

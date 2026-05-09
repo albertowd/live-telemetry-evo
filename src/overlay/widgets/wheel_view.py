@@ -47,6 +47,18 @@ def _draw_tinted(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
     p.drawPixmap(rect.topLeft(), pix)
 
 
+def _text_color_for(bg: QColor) -> QColor:
+    """Black or white, whichever lands more readable over ``bg``.
+
+    Uses Rec. 601 perceptual luminance — handles the full blue → green →
+    red sweep the temperature colours pass through. Alpha is ignored on
+    purpose: callers blend the colour over a similarly-tinted silhouette,
+    so the underlying RGB is the right reference.
+    """
+    lum = 0.299 * bg.redF() + 0.587 * bg.greenF() + 0.114 * bg.blueF()
+    return Colors.black if lum > 0.5 else Colors.white
+
+
 class WheelView(DraggableWidget):
     """One wheel's full visualisation. ``wheel_id`` is FL/FR/RL/RR — used
     to mirror the layout for right-side wheels and tag the title."""
@@ -154,6 +166,7 @@ class WheelView(DraggableWidget):
         p.setRenderHint(QPainter.Antialiasing, False)
         p.drawRect(QRectF(inner_x, top_y + quarter, part * 3.0, quarter * 6.0))
 
+        edge_zones: list[tuple[float, float, QColor]] = []
         for value, norm, x in (
             (d.tire_t_i, d.tire_t_norm_i, inner_x),
             (d.tire_t_m, d.tire_t_norm_m, rect.x() + pad + part),
@@ -163,7 +176,22 @@ class WheelView(DraggableWidget):
             p.setBrush(c)
             p.drawRect(QRectF(x, top_y, part, quarter))
             p.drawRect(QRectF(x, top_y + quarter * 7.0, part, quarter))
+            edge_zones.append((value, x, c))
         p.setRenderHint(QPainter.Antialiasing, True)
+
+        # Per-zone temperature readouts: inner / middle / outer in the top
+        # bumps, core temp in the centre. Text colour flips against the
+        # patch luminance so the value stays legible from cold blue
+        # through ideal green to hot red.
+        p.setFont(label_font(14))
+        for value, x, patch_color in edge_zones:
+            p.setPen(_text_color_for(patch_color))
+            p.drawText(QRectF(x, top_y, part, quarter),
+                       Qt.AlignCenter, f"{int(value)}°C")
+
+        p.setFont(label_font(20))
+        p.setPen(_text_color_for(core_color))
+        p.drawText(rect, Qt.AlignCenter, f"{int(d.tire_t_c)} °C")
 
     def _draw_dirt(self, p: QPainter, d: WheelData) -> None:
         full = QRectF(188.0, 128.0, 136.0, 116.0)
