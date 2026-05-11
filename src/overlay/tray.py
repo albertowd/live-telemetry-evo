@@ -26,6 +26,11 @@ def make_tray(
     click_through_shortcut: str | None = None,
     size_shortcut: str | None = None,
     quit_shortcut: str | None = None,
+# PySide6 exposes QAction.triggered / QMenu.aboutToShow /
+# QSystemTrayIcon.activated as bound Signal objects via runtime metaclass
+# magic that pylint can't introspect, so every .connect() in this module
+# trips no-member. The signals are real — we silence the whole function.
+# pylint: disable=no-member
 ) -> QSystemTrayIcon | None:
     """Build the notification-area icon and its context menu.
 

@@ -35,6 +35,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 - AC1 hides the brake icon entirely (icon + label) since `brakeTemp` is never written by the game; lock/ABS blink disappears with it on AC1.
 - Wear bars now space themselves evenly between the brake column and pressure icon — a lone visible bar pins to the top of the available height.
 - AC1 contact-patch middle bar no longer collapses: new `has_pressure_norm` flag neutralises the pressure axis when the norm is a rough synthesis.
+- AC1 reads per-car spec data from `data.acd`: real per-axle ideal pressure, raw torque LUT for live BHP/torque, per-compound tyre thermal curves.
+- AC install auto-detected via Steam registry + `libraryfolders.vdf`; honours `LT_AC_PATH` env override and falls back to the default Steam path.
 
 ## [0.5.0] - 2026-05-01
 

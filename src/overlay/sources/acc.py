@@ -55,7 +55,7 @@ from __future__ import annotations
 import ctypes
 import math
 import sys
-from ctypes import c_bool, c_float, c_int32, c_uint8, c_wchar
+from ctypes import c_float, c_int32, c_wchar
 from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer

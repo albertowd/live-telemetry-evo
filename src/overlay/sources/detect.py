@@ -22,7 +22,11 @@ from ctypes import wintypes
 
 _FILE_MAP_READ = 0x0004
 _TH32CS_SNAPPROCESS = 0x00000002
-_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+# Win32 returns INVALID_HANDLE_VALUE (a sign-extended -1) as the raw
+# integer wrapped in a c_void_p; cast through int so pylint sees a plain
+# constant instead of inferring it as a class definition via the .value
+# attribute walk.
+_INVALID_HANDLE = int(ctypes.c_void_p(-1).value or 0)
 
 
 if sys.platform == "win32":
@@ -82,7 +86,7 @@ def _running_processes() -> list[str]:
     if _KERNEL32 is None:
         return []
     snap = _CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
-    if snap is None or snap == _INVALID_HANDLE_VALUE:
+    if snap is None or snap == _INVALID_HANDLE:
         return []
 
     first = _KERNEL32.Process32FirstW

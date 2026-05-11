@@ -47,7 +47,20 @@ LOAD_PX_PER_N = 0.027
 # game-simulated per-face tyre temps (which already encode real contact
 # pressure × slip), the *height* is the heuristic.
 _CAMBER_FULL_BIAS_RAD = math.radians(4.0)  # ±4° = full lateral bias
-_PRESSURE_FULL_BIAS = 0.30                 # ±30% off ideal = full crown/bow
+# ±50% off ideal = full crown/bow. AC1's pressure norm is computed
+# against the *hot* PRESSURE_IDEAL, but the player sits on cold tyres
+# at session start (~25 psi vs a 33 psi target ≈ 25 % off). The old
+# 0.30 threshold treated that gap as a near-fully-bowed patch and
+# collapsed the middle bar; 0.50 keeps the heuristic responsive to
+# real off-ideal pressures while letting cold-tyre starts read as
+# moderately edge-loaded rather than middle-empty.
+_PRESSURE_FULL_BIAS = 0.50
+# How much the pressure bias actually shifts each zone's height. The raw
+# p_bias is in [-1, 1]; multiplying by 0.3 caps the visual swing at ±30%
+# of nominal so the middle bar never collapses to nothing under a fully
+# bowed tyre (matches reality better than the old 1.0 amp) and the
+# heuristic stays usable for AC1's wider cold-tyre deviation range.
+_PRESSURE_AMP = 0.3
 _LOAD_FULL_N = 6000.0                       # ~6 kN = full-height patch
 _LOAD_FLOOR = 0.30                          # patch never collapses fully
 # Visual amplification of the camber tilt. Real setup camber is ±2–3°,
@@ -317,17 +330,24 @@ class WheelView(DraggableWidget):
         load_n = max(0.0, min(1.0, d.tire_l / _LOAD_FULL_N))
         load_factor = _LOAD_FLOOR + (1.0 - _LOAD_FLOOR) * load_n
 
-        # Camber factor: inner fades out as axis → +1, outer as axis → -1,
-        # middle fades as |axis| → 1.
+        # Camber factor: inner fades out as axis → +1, outer as axis → -1.
+        # Middle is the geometric average of the edges — the centre of
+        # the patch sits *between* the loaded and unloaded edges, not
+        # below both of them. The previous ``1 - |axis|`` formula made
+        # middle equal to the unloaded edge at any non-zero camber,
+        # which combined with any pressure bow pushed middle below
+        # outer (the user-visible "middle is shortest" bug).
         inner_camber = max(0.0, 1.0 - max(0.0, camber_axis))
         outer_camber = max(0.0, 1.0 + min(0.0, camber_axis))
-        middle_camber = max(0.0, 1.0 - abs(camber_axis))
+        middle_camber = (inner_camber + outer_camber) * 0.5
 
         # Pressure factor: bowing (p_bias > 0) lifts the middle and adds
-        # load to the edges, crowning (p_bias < 0) reverses. Additive
-        # multiplier in [0, 2]; clamped by the eventual height clamp.
-        edge_press = 1.0 + p_bias
-        middle_press = 1.0 - p_bias
+        # load to the edges, crowning (p_bias < 0) reverses. The shift is
+        # damped to ``_PRESSURE_AMP`` so even a fully-bowed tyre keeps
+        # *some* middle load — physically, an under-pressure tyre still
+        # bears centre load, it just bears less than the edges.
+        edge_press = 1.0 + p_bias * _PRESSURE_AMP
+        middle_press = 1.0 - p_bias * _PRESSURE_AMP
 
         # Segment positions mirror the IMO band convention above:
         # INNER on the screen-centre-facing side, OUTER on the

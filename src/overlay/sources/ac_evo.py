@@ -38,7 +38,7 @@ import ctypes
 import math
 import sys
 from ctypes import (c_bool, c_byte, c_char, c_float, c_int8, c_int16, c_int32,
-                    c_uint8, c_uint16, c_uint32, c_uint64, c_wchar)
+                    c_uint8, c_uint16, c_uint32, c_uint64)
 from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer
@@ -673,8 +673,7 @@ class AcEvoTelemetrySource(TelemetrySource):
             # seeds it with 100 % headroom, and subsequent harder
             # compressions tighten with a 5 % headroom.
             if w.susp_m_t > 0.0:
-                if w.susp_t * 1.05 > w.susp_m_t:
-                    w.susp_m_t = w.susp_t * 1.05
+                w.susp_m_t = max(w.susp_m_t, w.susp_t * 1.05)
             elif w.susp_t > 0.0:
                 w.susp_m_t = w.susp_t * 2.0
 

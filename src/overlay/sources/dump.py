@@ -14,6 +14,7 @@ matched to byte offsets.
 from __future__ import annotations
 
 import argparse
+import math
 import struct
 import sys
 import time
@@ -49,7 +50,7 @@ def _track_monotonic(reader: AcEvoSharedMemoryReader, segment: str,
             values = [struct.unpack_from("<f", s, i)[0] for s in samples]
         except struct.error:
             continue
-        if any(v != v for v in values):  # NaN
+        if any(math.isnan(v) for v in values):
             continue
         if not all(lo <= v <= hi for v in values):
             continue
@@ -83,7 +84,7 @@ def _scan_floats(data: bytes, lo: float, hi: float, max_offset: int = 4096) -> s
     end = min(len(data), max_offset)
     for i in range(0, end - 4, 4):
         v = struct.unpack_from("<f", data, i)[0]
-        if v != v or v == 0.0:  # skip NaN and exact zero
+        if math.isnan(v) or v == 0.0:
             continue
         if lo <= v <= hi:
             lines.append(f"  0x{i:04x} ({i:4d}): {v:.6f}")

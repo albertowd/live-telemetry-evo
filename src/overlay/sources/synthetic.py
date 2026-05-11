@@ -70,7 +70,7 @@ class SyntheticTelemetrySource(TelemetrySource):
         e.tc_in_action = throttle > 0.85
         e.abs_in_action = brake > 0.55
         # Pit limiter pulses on briefly every ~30 s so the chip is visible.
-        e.pit_limiter = (math.sin(t * 0.21) > 0.97)
+        e.pit_limiter = math.sin(t * 0.21) > 0.97
         # Shift hints fire near the redline / off-throttle window so the
         # RPM bar's shift-light colour change is visible in synthetic mode.
         rpm_ratio = e.rpm / e.max_rpm if e.max_rpm > 0.0 else 0.0

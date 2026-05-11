@@ -30,7 +30,7 @@ A couple of AC1-specific details worth noting:
   at the apply step.
 * Per-face normalised temperatures / pressure don't exist on AC1, so
   we synthesise them by interpolating the same tyre-temp curve the
-  synthetic source uses and assuming an ideal cold pressure of 26 psi.
+  synthetic source uses and assuming an ideal cold pressure of 27 psi.
   This keeps the colour bands on the widgets working — they'd otherwise
   stick at "ideal green" regardless of actual temperature/pressure.
 * Lock / ABS-active flags aren't published on AC1. We use a simple
@@ -51,6 +51,8 @@ from ..interpolation import (Curve, DEFAULT_BRAKE_TEMP_CURVE,
                               DEFAULT_TIRE_TEMP_CURVE)
 from ..telemetry import TelemetryFrame, WHEEL_IDS
 from ._win32_mapping import NamedMapping
+from .ac1_acd import ACD
+from .ac1_install import find_car_dir
 from .base import TelemetrySource
 
 
@@ -232,9 +234,9 @@ class _SPageFileStatic(ctypes.Structure):
 
 # Synthetic ideal cold pressure used to compute a normalised pressure
 # fallback (AC1 doesn't publish a per-compound ideal). Most race / sim
-# pressures hover around 26 psi cold, so this is a reasonable default —
+# pressures hover around 27 psi cold, so this is a reasonable default —
 # the widget's pressure colour bands then react to deviation from there.
-_AC1_IDEAL_PSI = 26.0
+_AC1_IDEAL_PSI = 27.0
 # Wheel-slip threshold above which we treat the wheel as locked under
 # braking. AC1 doesn't publish a per-wheel lock flag, so we infer.
 _LOCK_SLIP_THRESHOLD = 0.40
@@ -293,9 +295,20 @@ class AcTelemetrySource(TelemetrySource):
         super().__init__(parent)
         self._reader = AcSharedMemoryReader()
         self._frame = TelemetryFrame()
-        # Curve fallbacks for the *_norm fields AC1 doesn't publish.
-        self._tire_curve = Curve(DEFAULT_TIRE_TEMP_CURVE)
+        # Default curves for the *_norm fields AC1 doesn't publish — used
+        # until we successfully load per-compound curves from the ACD.
+        self._default_tire_curve = Curve(DEFAULT_TIRE_TEMP_CURVE)
         self._brake_curve = Curve(DEFAULT_BRAKE_TEMP_CURVE)
+        # ACD-derived per-car/per-wheel-axle data. ``_acd`` is set on
+        # connect; ``_torque_lut`` is the raw rpm->Nm table the .lut
+        # ships and powers both current_bhp and current_torque. Per-wheel
+        # tyre curves + ideal pressures re-load whenever the compound
+        # changes (graphics block re-publishes tyreCompound mid-stint).
+        self._acd: ACD | None = None
+        self._torque_lut: Curve | None = None
+        self._tire_curves: dict[str, Curve] = {}
+        self._ideal_pressure_psi: dict[str, float] = {}
+        self._loaded_compound: str = ""
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -369,6 +382,66 @@ class AcTelemetrySource(TelemetrySource):
             if sm > 0.0:
                 w.susp_m_t = sm
 
+        # Try to load the on-disk ACD for this car — gives us the real
+        # torque curve, per-compound thermal performance, and per-axle
+        # ideal pressures, none of which AC1 publishes via shared memory.
+        self._load_acd(getattr(st, "carModel", ""))
+        self._refresh_engine_curves()
+
+    def _load_acd(self, car_model: str) -> None:
+        """Locate and parse ``content/cars/<car_model>/data.acd``.
+
+        Silent on missing AC install / missing car directory / mod cars
+        without ACD: the source falls back to its prior synth-curve
+        behaviour. We log once on success so the user can confirm the
+        ACD path was found.
+        """
+        self._acd = None
+        car_model = (car_model or "").strip()
+        if not car_model:
+            return
+        car_dir = find_car_dir(car_model)
+        if car_dir is None:
+            return
+        try:
+            self._acd = ACD(car_dir)
+            print(f"[ac1] loaded ACD for {car_model}")
+        except (OSError, ValueError) as exc:
+            print(f"[ac1] ACD load failed for {car_model}: {exc}", file=sys.stderr)
+            self._acd = None
+
+    def _refresh_engine_curves(self) -> None:
+        """Parse engine.ini's POWER_CURVE .lut into a torque LUT we can
+        interpolate per-frame. The same LUT feeds both current_torque
+        (Nm direct) and current_bhp (Nm × rpm / 5252)."""
+        self._torque_lut = None
+        if self._acd is None:
+            return
+        torque_pts = self._acd.get_power_curve()
+        if not torque_pts:
+            return
+        self._torque_lut = Curve(torque_pts)
+
+    def _refresh_compound_curves(self, compound: str) -> None:
+        """Reload per-axle thermal-performance + ideal-pressure data when
+        the compound changes (or when we first see one). AC1's graphics
+        block re-publishes ``tyreCompound`` every frame, so we no-op when
+        the compound hasn't actually changed."""
+        if compound == self._loaded_compound:
+            return
+        self._loaded_compound = compound
+        self._tire_curves = {}
+        self._ideal_pressure_psi = {}
+        if self._acd is None or not compound:
+            return
+        for wid in WHEEL_IDS:
+            temp_pts = self._acd.get_temp_curve(compound, wid)
+            if temp_pts:
+                self._tire_curves[wid] = Curve(temp_pts)
+            ideal = self._acd.get_ideal_pressure(compound, wid)
+            if ideal is not None and ideal > 0.0:
+                self._ideal_pressure_psi[wid] = ideal
+
     def _apply_physics(self, ph: _SPageFilePhysics) -> None:
         e = self._frame.engine
         e.rpm = float(ph.rpms)
@@ -376,6 +449,16 @@ class AcTelemetrySource(TelemetrySource):
         e.max_turbo_boost = max(e.max_turbo_boost, e.turbo_boost)
         e.gear = int(ph.gear)
         e.speed_kmh = float(ph.speedKmh)
+
+        # Live BHP / torque from the ACD's torque LUT when available.
+        # AC1's shared memory doesn't publish either — the engine widget
+        # would otherwise sit on a synthetic curve fitted from the
+        # static peaks. With the .lut we interpolate the real torque at
+        # the current RPM and convert to HP via the canonical 5252.
+        if self._torque_lut is not None and e.rpm > 0.0:
+            torque_nm = max(0.0, self._torque_lut.interpolate(e.rpm))
+            e.current_torque = torque_nm
+            e.current_bhp = torque_nm * e.rpm / 5252.0
         e.tc_level = float(ph.tc)
         e.abs_level = float(ph.abs)
         e.pit_limiter = bool(ph.pitLimiterOn)
@@ -411,75 +494,86 @@ class AcTelemetrySource(TelemetrySource):
         moving = ph.speedKmh > 5.0
 
         for wid in WHEEL_IDS:
-            idx = _WHEEL_INDEX[wid]
-            w = self._frame.wheels[wid]
+            self._apply_wheel_physics(ph, wid, braking, moving)
 
-            slip = abs(float(ph.wheelSlip[idx]))
-            # AC1 doesn't publish a lock flag — use a slip-magnitude
-            # threshold under braking instead. Same idea for abs_active.
-            w.lock = bool(braking and moving and slip > _LOCK_SLIP_THRESHOLD)
-            w.abs_active = bool(braking and float(ph.abs) > 0.0
-                                and not w.lock and slip > _ABS_SLIP_THRESHOLD)
+    def _apply_wheel_physics(self, ph: _SPageFilePhysics, wid: str,
+                              braking: bool, moving: bool) -> None:
+        """Per-wheel slice of :meth:`_apply_physics`. Extracted to keep
+        the parent function under pylint's statement-count budget; the
+        body itself reads as one wheel's worth of work."""
+        idx = _WHEEL_INDEX[wid]
+        w = self._frame.wheels[wid]
 
-            w.camber = float(ph.camberRAD[idx])
-            w.susp_t = abs(float(ph.suspensionTravel[idx]))
-            # If static didn't supply a max (mods sometimes leave it 0),
-            # fall back to a rolling-max with 5 % headroom — same trick
-            # the AC Evo source uses.
-            if w.susp_m_t <= 0.0 and w.susp_t > 0.0:
+        slip = abs(float(ph.wheelSlip[idx]))
+        # AC1 doesn't publish a lock flag — use a slip-magnitude
+        # threshold under braking instead. Same idea for abs_active.
+        w.lock = bool(braking and moving and slip > _LOCK_SLIP_THRESHOLD)
+        w.abs_active = bool(braking and float(ph.abs) > 0.0
+                            and not w.lock and slip > _ABS_SLIP_THRESHOLD)
+
+        w.camber = float(ph.camberRAD[idx])
+        w.susp_t = abs(float(ph.suspensionTravel[idx]))
+        # If static didn't supply a max (mods sometimes leave it 0),
+        # fall back to a rolling-max with 5 % headroom — same trick
+        # the AC Evo source uses. The outer guard ensures we never
+        # divide-or-multiply by a zero reading.
+        if w.susp_t > 0.0:
+            if w.susp_m_t <= 0.0:
                 w.susp_m_t = w.susp_t * 2.0
-            elif w.susp_m_t > 0.0 and w.susp_t * 1.05 > w.susp_m_t:
+            elif w.susp_m_t < w.susp_t * 1.05:
                 w.susp_m_t = w.susp_t * 1.05
 
-            axle = idx // 2
-            raw = float(ph.rideHeight[axle])
-            w.height = raw if abs(raw) >= 1.0 else raw * 1000.0
+        axle = idx // 2
+        raw = float(ph.rideHeight[axle])
+        w.height = raw if abs(raw) >= 1.0 else raw * 1000.0
 
-            w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
-            w.tire_l = float(ph.wheelLoad[idx])
-            w.tire_p = float(ph.wheelsPressure[idx])
-            # AC1 doesn't publish a normalised pressure; synthesise one
-            # against a fixed-ideal 26 psi reference so the pressure
-            # widget's colour bands still react sensibly. Inaccurate
-            # against the per-car / per-compound real ideal, but better
-            # than pinning to 1.0 = "always green".
+        w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
+        w.tire_l = float(ph.wheelLoad[idx])
+        w.tire_p = float(ph.wheelsPressure[idx])
+        # tire_p_norm: use the real PRESSURE_IDEAL from the ACD's
+        # tyres.ini when we have it (per-axle, per-compound), else
+        # fall back to a fixed-ideal 27 psi approximation. The
+        # ACD-backed norm is accurate enough for the contact-patch
+        # heuristic, so flip has_pressure_norm True in that case.
+        ideal_psi = self._ideal_pressure_psi.get(wid, 0.0)
+        if ideal_psi > 0.0:
+            w.tire_p_norm = w.tire_p / ideal_psi
+            w.has_pressure_norm = True
+        else:
             w.tire_p_norm = w.tire_p / _AC1_IDEAL_PSI if _AC1_IDEAL_PSI > 0 else 1.0
-            # The synth above is a rough psi/26 approximation: fine for
-            # the pressure icon's colour but too inaccurate for the
-            # contact-patch heuristic (a 30 % deviation collapses a
-            # whole zone). Flag the norm as unreliable so the bars
-            # ignore pressure and render off camber + load only.
             w.has_pressure_norm = False
 
-            w.tire_t_c = float(ph.tyreCoreTemperature[idx])
-            w.tire_t_i = float(ph.tyreTempI[idx])
-            w.tire_t_m = float(ph.tyreTempM[idx])
-            w.tire_t_o = float(ph.tyreTempO[idx])
-            # No per-compound normalised temps on AC1 — interpolate the
-            # default tyre-temp curve so the widget's blue/green/red
-            # bands still drive off something meaningful.
-            w.tire_t_norm_c = self._tire_curve.interpolate(w.tire_t_c)
-            w.tire_t_norm_i = self._tire_curve.interpolate(w.tire_t_i)
-            w.tire_t_norm_m = self._tire_curve.interpolate(w.tire_t_m)
-            w.tire_t_norm_o = self._tire_curve.interpolate(w.tire_t_o)
+        w.tire_t_c = float(ph.tyreCoreTemperature[idx])
+        w.tire_t_i = float(ph.tyreTempI[idx])
+        w.tire_t_m = float(ph.tyreTempM[idx])
+        w.tire_t_o = float(ph.tyreTempO[idx])
+        # Per-compound thermal performance curve from the ACD when
+        # available; otherwise the synthetic-source default. The
+        # ACD curve is temperature -> grip fraction, the same shape
+        # tire_t_norm_* expects.
+        tire_curve = self._tire_curves.get(wid, self._default_tire_curve)
+        w.tire_t_norm_c = tire_curve.interpolate(w.tire_t_c)
+        w.tire_t_norm_i = tire_curve.interpolate(w.tire_t_i)
+        w.tire_t_norm_m = tire_curve.interpolate(w.tire_t_m)
+        w.tire_t_norm_o = tire_curve.interpolate(w.tire_t_o)
 
-            # AC1's brakeTemp slot is never written by the game — it sits
-            # at the initial ambient (~12 °C) all session. Mark the signal
-            # unavailable so the widget hides the temperature label and
-            # falls back to a neutral icon tint instead of misleading.
-            w.brake_t = float(ph.brakeTemp[idx])
-            w.brake_t_norm = self._brake_curve.interpolate(w.brake_t)
-            w.has_brake_temp = False
+        # AC1's brakeTemp slot is never written by the game — it sits
+        # at the initial ambient (~12 °C) all session. Mark the signal
+        # unavailable so the widget hides the temperature label and
+        # the icon entirely instead of misleading.
+        w.brake_t = float(ph.brakeTemp[idx])
+        w.brake_t_norm = self._brake_curve.interpolate(w.brake_t)
+        w.has_brake_temp = False
 
-            # AC1's tyreWear is % remaining (100 fresh, 0 bald). Convert
-            # to the overlay's "remaining grip" convention (1.0 fresh).
-            wear_pct = float(ph.tyreWear[idx])
-            w.tire_w = max(0.0, min(1.0, wear_pct / 100.0))
-            # AC1's SDK predates padLife / discLife — the fields aren't in
-            # the physics struct at all. Hide the brake-wear bars instead
-            # of rendering stuck-fresh values that would mislead the user.
-            w.has_pad_wear = False
-            w.has_disc_wear = False
+        # AC1's tyreWear is % remaining (100 fresh, 0 bald). Convert
+        # to the overlay's "remaining grip" convention (1.0 fresh).
+        wear_pct = float(ph.tyreWear[idx])
+        w.tire_w = max(0.0, min(1.0, wear_pct / 100.0))
+        # AC1's SDK predates padLife / discLife — the fields aren't in
+        # the physics struct at all. Hide the brake-wear bars instead
+        # of rendering stuck-fresh values that would mislead the user.
+        w.has_pad_wear = False
+        w.has_disc_wear = False
 
     def _apply_graphics(self, gr: _SPageFileGraphic) -> None:
         """Pull the few graphics-block fields the overlay uses on AC1.
@@ -493,3 +587,7 @@ class AcTelemetrySource(TelemetrySource):
         compound = (gr.tyreCompound or "").strip()
         for wid in WHEEL_IDS:
             self._frame.wheels[wid].compound = compound
+        # Compound can change mid-stint (pit stops on track-day cars,
+        # tyre swaps in practice). Reload per-wheel ACD curves whenever
+        # the string changes; no-op when it hasn't.
+        self._refresh_compound_curves(compound)

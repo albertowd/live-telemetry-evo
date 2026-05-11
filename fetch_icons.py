@@ -78,7 +78,7 @@ def rasterise(svg_bytes: bytes, out_path: Path, size: int) -> None:
     """
     renderer = QSvgRenderer(QByteArray(svg_bytes))
     if not renderer.isValid():
-        raise RuntimeError(f"invalid SVG (Iconify returned an empty doc?)")
+        raise RuntimeError("invalid SVG (Iconify returned an empty doc?)")
     image = QImage(size, size, QImage.Format_ARGB32)
     image.fill(0)  # transparent
     painter = QPainter(image)

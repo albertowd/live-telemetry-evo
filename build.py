@@ -46,7 +46,9 @@ def _read_version() -> str:
 
 def _ensure_pyinstaller() -> None:
     try:
-        import PyInstaller  # noqa: F401
+        # Import is intentionally side-effect-only: we just need to know
+        # PyInstaller is installed before invoking it via subprocess.
+        import PyInstaller  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
     except ImportError:
         sys.stderr.write(
             "[build] PyInstaller is not installed. Run:\n"
@@ -71,7 +73,9 @@ def _convert_icon() -> Path | None:
         print(f"[build] no icon at {ICON_PNG} -- building without one")
         return None
     try:
-        from PIL import Image
+        # Lazy import: Pillow is only needed when icon.ico is missing
+        # but icon.png is present — skip the dependency otherwise.
+        from PIL import Image  # pylint: disable=import-outside-toplevel
     except ImportError:
         sys.stderr.write(
             "[build] Pillow is not installed (needed to convert icon.png -> .ico). Run:\n"
