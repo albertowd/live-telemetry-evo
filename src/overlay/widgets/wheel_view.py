@@ -286,7 +286,13 @@ class WheelView(DraggableWidget):
         ground reference. Temperature information lives in the IMO band
         above; mixing it into the contact patch made the two harder to
         compare at a glance.
+
+        Hidden entirely when the source flags ``has_wheel_load`` False —
+        without a real load signal (ACC's case) the bars degenerate to
+        a constant floor pattern that's worse than nothing.
         """
+        if not d.has_wheel_load:
+            return
         band_x = 188.0
         band_w = 136.0      # mirror the IMO band width above
         band_top = TOP_MARGIN + 256.0  # flush with the tire bottom
@@ -503,6 +509,8 @@ class WheelView(DraggableWidget):
         p.drawText(label_rect, Qt.AlignCenter, f"{d.tire_p:.1f} psi")
 
     def _draw_height(self, p: QPainter, d: WheelData) -> None:
+        if not d.has_ride_height:
+            return
         rect = QRectF(self._x_left(430.0, 64.0), TOP_MARGIN + 208.0, 64.0, 48.0)
         if d.height < 20.0:
             self._height_warn_until = time.monotonic() + WARNING_TIME_S
@@ -524,7 +532,10 @@ class WheelView(DraggableWidget):
         # linearly with load up to the tire silhouette's width (160 px);
         # no minimum floor, so a wheel that goes light or off the ground
         # accurately shrinks toward zero rather than holding a fake
-        # "minimum size" floor.
+        # "minimum size" floor. Hidden when the source doesn't publish
+        # wheelLoad (ACC) — a permanent zero-radius circle reads as a bug.
+        if not d.has_wheel_load:
+            return
         center = QPointF(256.0, TOP_MARGIN + 128.0)
         diameter = max(0.0, min(160.0, d.tire_l * LOAD_PX_PER_N))
         if diameter < 1.0:

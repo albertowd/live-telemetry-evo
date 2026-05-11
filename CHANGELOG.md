@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Assetto Corsa Competizione support** via a new `--source acc`
+  flag. ACC's physics block matches AC Evo's 800-byte layout, so
+  live BHP / slip / `padLife` / `discLife` / `currentMaxRpm` work
+  out of the box. ACC doesn't publish `camberRAD`, `rideHeight`,
+  `wheelLoad`, or per-face `tyreTempI/M/O` (the v1.8.12 PDF
+  colour-codes these as unused); the source flips per-field
+  capability flags so the wheel widget hides the ride-height icon,
+  load circle, and contact-patch bars on ACC rather than showing
+  stuck-zero values, and the IMO grid falls back to core
+  temperature. Note: ACC and AC1 share the same `Local\acpmf_*`
+  tag names, so the user picks which struct layout via the CLI.
+  The PDF mis-types `currentMaxRpm` as `float`; the source reads
+  it as `int32` to match what ACC actually writes.
+
 - **Original Assetto Corsa support** via a new `--source ac1` flag.
   Reads AC1's `Local\acpmf_*` shared-memory blocks with the SDK
   struct layout. Fields AC Evo added but AC1 doesn't publish
@@ -14,7 +28,7 @@ adheres to [Semantic Versioning](https://semver.org/).
   normalised temps / pressure, per-wheel `lock`) fall back to the
   synthesised power curve, slip-threshold heuristics, and
   curve-interpolated norms — widgets render sensible signals on
-  both games.
+  all three games.
 - **Tire rotates by camber** on each wheel widget — silhouette,
   IMO grid and dirt overlay tilt around the tire centre (×2 visual
   amplification), consistent across left and right wheels.
@@ -24,6 +38,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   themselves are the ground reference.
 
 ### Changed
+- `WheelData` gains two source-capability flags (`has_wheel_load`,
+  `has_ride_height`, default True). Sources that don't publish a
+  given signal flip the flag false; the wheel widget early-returns
+  from the matching draw path so the indicator hides rather than
+  rendering a stuck value. Used by the ACC source today.
 - Removed the old trapezoidal camber strip — the tire rotation plus
   the contact bars replace it.
 - IMO temp grid now always shows the **inner** face on the

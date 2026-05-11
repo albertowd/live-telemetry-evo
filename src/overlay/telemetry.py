@@ -41,6 +41,13 @@ class WheelData:
     # self-calibrates against the per-wheel max it has seen this session.
     pad_w: float = 1.0
     disc_w: float = 1.0
+    # Source-capability hints. Default True (the field IS published).
+    # A source that knows it never writes to one of these slots flips
+    # the flag False so the widget hides the corresponding indicator
+    # instead of rendering a stuck zero. ACC for example writes nothing
+    # to wheelLoad or rideHeight, so its source sets both to False.
+    has_wheel_load: bool = True
+    has_ride_height: bool = True
 
 
 @dataclass

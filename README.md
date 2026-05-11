@@ -3,12 +3,13 @@
 ![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/preview.webp)
 
 Transparent, always-on-top desktop overlay that displays live engine and per-wheel
-telemetry on top of **Assetto Corsa Evo** *or* the original **Assetto Corsa**.
-Built with **PySide6** and ported from the original AC1 *LiveTelemetry* plugin.
+telemetry on top of **Assetto Corsa Evo**, the original **Assetto Corsa**, or
+**Assetto Corsa Competizione**. Built with **PySide6** and ported from the
+original AC1 *LiveTelemetry* plugin.
 
 The overlay reads the game's three named shared-memory blocks (AC Evo:
-`Local\acevo_pmf_*`; AC1: `Local\acpmf_*`) when a game is running, or falls back to
-a synthetic data generator for development and screenshots.
+`Local\acevo_pmf_*`; AC1 and ACC: `Local\acpmf_*`) when a game is running, or
+falls back to a synthetic data generator for development and screenshots.
 
 ---
 
@@ -39,24 +40,50 @@ Or use `run.bat`, which uses the venv's Python directly (no activation needed).
 ### Command-line flags
 
 ```bash
-python -m overlay --source ac-evo      # default — live AC Evo shared memory
-python -m overlay --source ac1         # live original Assetto Corsa shared memory
+python -m overlay --source ac-evo      # default — live Assetto Corsa Evo
+python -m overlay --source acc         # Assetto Corsa Competizione
+python -m overlay --source ac1         # original Assetto Corsa
 python -m overlay --source synthetic   # animated mock data, no game required
 python -m overlay --hz 120             # sample rate in Hz (default: 60)
 ```
 
-Both live sources attach via Win32 `OpenFileMappingW`. If the chosen game isn't
-running the overlay polls quietly once a second and connects automatically when
-the game starts publishing.
+All three live sources attach via Win32 `OpenFileMappingW`. If the chosen game
+isn't running the overlay polls quietly once a second and connects automatically
+when the game starts publishing.
 
-**On AC1 specifically**, a few AC Evo-only fields don't exist in the older game's
-shared memory (`current_bhp`, per-aid `*_in_action` flags, per-wheel `padLife` /
-`discLife`, normalised temps / pressure, the per-wheel `lock` flag). The source
-fills them in with sensible fallbacks: live BHP falls back to the synthesised
-power curve, lock/ABS-active are inferred from a wheel-slip threshold under
-braking, normalised temps come from interpolating the default tyre-temp curve,
-and normalised pressure assumes a fixed 26 psi cold ideal. Brake-pad / disc
-wear bars stay full because AC1 doesn't publish that data either way.
+**Important:** AC1 and ACC publish under the *same* shared-memory tag names
+(`Local\acpmf_*`) — only one of those games can be running at a time anyway,
+and the `--source` flag tells the overlay which struct layout to apply.
+Attaching with the wrong layout reads garbage values.
+
+**On AC1**, AC Evo-only fields don't exist (`current_bhp`, per-aid
+`*_in_action` flags, `padLife` / `discLife`, normalised temps / pressure, the
+per-wheel `lock` flag). Fallbacks: live BHP from the synthesised power curve,
+lock / ABS-active inferred from a wheel-slip threshold under braking,
+normalised temps from interpolating the default tyre-temp curve, normalised
+pressure assumes a fixed 26 psi cold ideal. Brake-pad / disc wear bars stay
+full since AC1 doesn't publish that data.
+
+**On ACC**, the physics block matches AC Evo's layout, so live BHP, slip,
+`tcInAction` / `absInAction`, `padLife` / `discLife`, `currentMaxRpm` all
+work. A handful of fields are in the struct but **ACC never writes to
+them** (the PDF colour-codes them as unused; the colour is lost when
+extracting the PDF text). Confirmed empirically as flat zero against a
+running game:
+
+| Field | Effect on the overlay |
+|---|---|
+| `camberRAD` | Tire silhouette stays upright (no rotation). |
+| `rideHeight` | Ride-height icon and label hidden entirely (rather than displaying a stuck zero). |
+| `wheelLoad` | Load circle and contact-patch bars hidden entirely. |
+| `tyreTempI/M/O` | Per-face IMO grid falls back to core temperature — all three cells render the same colour. |
+
+The PDF mis-types `currentMaxRpm` as `float`; in reality ACC writes it
+as `int32` like AC Evo. The source reads it as int32 (mistyping it
+would peg the RPM bar at 100 %). Per-wheel `lock` uses the same slip
+heuristic as AC1. Normalised pressure assumes 26 psi cold ideal;
+`tyreWear` is treated as AC1-style "% remaining". Source: ACC Shared
+Memory Documentation v1.8.12 (bundled at the repo root).
 
 ---
 
@@ -371,7 +398,8 @@ src/overlay/
 │   ├── synthetic.py           # mock data generator
 │   ├── ac_evo.py              # AC Evo shared-memory reader
 │   ├── ac1.py                 # original Assetto Corsa shared-memory reader
-│   ├── _win32_mapping.py      # NamedMapping (OpenFileMappingW) shared by ac_evo + ac1
+│   ├── acc.py                 # Assetto Corsa Competizione shared-memory reader
+│   ├── _win32_mapping.py      # NamedMapping (OpenFileMappingW) shared by all live readers
 │   └── dump.py                # `python -m overlay.sources.dump` for SHM debugging
 └── widgets/
     ├── countdown.py           # full-screen 5 s countdown shown at startup
