@@ -706,9 +706,9 @@ class AcEvoTelemetrySource(TelemetrySource):
             # readouts exactly). The real tyre-wear field hasn't been
             # located yet — the in-game "2.98 %" and per-face OMIs are
             # almost certainly in one of the still-opaque graphics
-            # substructs. Until then, leave `tire_w` at its default
-            # (1.0 = fresh) so the wear bar reads "no info" rather than
-            # lying about a value we don't have.
+            # substructs. Until then hide the bar instead of rendering
+            # the default 1.0 ("fresh") as if it were live.
+            w.has_tire_wear = False
 
     def _apply_graphics(self, gr: _SPageFileGraphic) -> None:
         """Pull HUD/graphics fields that complement (and in places replace)

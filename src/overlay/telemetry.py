@@ -53,6 +53,25 @@ class WheelData:
     has_wheel_load: bool = True
     has_ride_height: bool = True
     has_camber: bool = True
+    # AC EVO leaves tyreWear at 0 in current builds; AC1 has no padLife /
+    # discLife in its SDK. Sources flip the matching flag false so the
+    # widget hides the bar instead of rendering a stuck-full indicator.
+    has_tire_wear: bool = True
+    has_pad_wear: bool = True
+    has_disc_wear: bool = True
+    # AC1's ph.brakeTemp slot exists in the struct but the game never
+    # writes to it, so it reads the initial ambient (~12 °C) all session.
+    # AC1 flips this False so the widget skips the temperature label and
+    # draws the brake icon in a neutral tint instead of pretending the
+    # disc is permanently cold.
+    has_brake_temp: bool = True
+    # AC1 doesn't publish a normalised tyre pressure — sources that lack
+    # it synthesise one from raw psi over a hard-coded ideal, which is
+    # good enough for the pressure icon's colour bands but too brittle
+    # for the contact-patch heuristic (a 30 % deviation zeros a zone).
+    # Sources flip this False so the contact-patch math neutralises the
+    # pressure axis and renders all three segments based on camber+load.
+    has_pressure_norm: bool = True
 
 
 @dataclass

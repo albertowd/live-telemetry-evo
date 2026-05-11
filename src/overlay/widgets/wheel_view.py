@@ -164,12 +164,8 @@ class WheelView(DraggableWidget):
         # gets visually clipped against the bars.
         self._draw_contact_patch(p, d)
         self._draw_suspension(p, d)
-        # Wear bar hidden: AC EVO doesn't publish tyre wear via shared
-        # memory (three independent investigations, see SHARED_MEMORY.md
-        # §9.1). Re-enable this call if/when Kunos starts publishing it.
-        # self._draw_wear(p, d)
         self._draw_lock(p, d, delta_t)
-        self._draw_brake_wear(p, d)
+        self._draw_wear_bars(p, d)
         self._draw_pressure(p, d)
         self._draw_height(p, d)
         self._draw_load(p, d)  # last, on top
@@ -307,8 +303,14 @@ class WheelView(DraggableWidget):
         camber_axis = max(-1.0, min(1.0, camber_n / _CAMBER_FULL_BIAS_RAD))
 
         # +1 = bowed (under-inflated, edges carry), -1 = crowned
-        # (over-inflated, centre carries), 0 = ideal.
-        p_bias = max(-1.0, min(1.0, (1.0 - d.tire_p_norm) / _PRESSURE_FULL_BIAS))
+        # (over-inflated, centre carries), 0 = ideal. Neutralised when
+        # the source's tire_p_norm is a rough psi/ideal synthesis (AC1)
+        # — without a real normalised signal the heuristic would collapse
+        # whichever zone the synth landed >30 % away from "ideal".
+        if d.has_pressure_norm:
+            p_bias = max(-1.0, min(1.0, (1.0 - d.tire_p_norm) / _PRESSURE_FULL_BIAS))
+        else:
+            p_bias = 0.0
 
         # Load magnitude scales the overall patch, with a floor so a
         # stationary tire still shows *some* contact strip.
@@ -383,35 +385,13 @@ class WheelView(DraggableWidget):
         p.setBrush(band)
         p.drawRect(QRectF(inner.x(), inner.y(), inner.width(), max(0.0, fill_h)))
 
-    def _draw_wear(self, p: QPainter, d: WheelData) -> None:
-        rect = QRectF(self._x_left(154.0, 10.0), 2.0, 10.0, 252.0)
-        # Black bar with a 2 px white border.
-        p.setPen(QPen(Colors.white, 2.0))
-        p.setBrush(Colors.black)
-        p.drawRect(rect)
-
-        # Map only the *usable* portion of the wear cycle to the bar.
-        # AC Evo reports wear on a small scale (1.0 = fresh; the tyre is
-        # past its performance cliff well before 0.85), so an empty bar
-        # means "pit now", not "still has some life left somewhere". The
-        # 0.93..1.00 window is tight enough that wear ticks fill the bar
-        # across its full height instead of crawling through the top
-        # pixels, and the colour bands move 3 % earlier so red lands
-        # while there's still time to react.
-        if d.tire_w > 0.98:
-            color = Colors.green
-        elif d.tire_w > 0.95:
-            color = Colors.yellow
-        else:
-            color = Colors.red
-        wear = max(0.0, min(1.0, (d.tire_w - 0.93) / 0.07))
-        fill_h = wear * rect.height()
-        fill = QRectF(rect.x(), rect.bottom() - fill_h, rect.width(), fill_h)
-        p.setPen(Qt.NoPen)
-        p.setBrush(color)
-        p.drawRect(fill)
-
     def _draw_lock(self, p: QPainter, d: WheelData, delta_t: float) -> None:
+        # Hide the whole brake icon when no real disc temperature signal
+        # exists (AC1's brakeTemp slot is dead). The icon's main purpose
+        # is the temperature tint plus ABS/lock blink — without a live
+        # temp it would be a permanently-neutral square that misleads.
+        if not d.has_brake_temp:
+            return
         rect = QRectF(self._x_left(70.0, 60.0), 0.0, 60.0, 60.0)
 
         if d.lock:
@@ -451,14 +431,36 @@ class WheelView(DraggableWidget):
                             rect.width() + 40.0, 22.0)
         p.drawText(label_rect, Qt.AlignCenter, f"{int(d.brake_t)} °C")
 
-    def _draw_brake_wear(self, p: QPainter, d: WheelData) -> None:
-        """Horizontal disc/pad wear bars in the gap between the brake-
-        temperature label and the pressure icon. Each row has a centred
-        title and a left→right fill (full bar = fresh). Self-calibrated
-        against the per-wheel max observed since session start, since
-        AC EVO's padLife / discLife raw scale isn't pinned down."""
+    def _draw_wear_bars(self, p: QPainter, d: WheelData) -> None:
+        """Horizontal Disk / Pads / Tire wear bars stacked between the
+        brake-temperature label (when present) and the pressure icon.
+        Each row has a centred title and a left→right fill (full = fresh).
+
+        Disk / Pads self-calibrate against the per-wheel max observed
+        since session start (AC EVO's padLife / discLife absolute scale
+        isn't pinned down), so the green→red bands work off a relative
+        ratio. Tire wear comes in as a true 0..1 % remaining, so its
+        bands sit at the points where compound grip typically falls off.
+
+        Layout: when the brake column is visible (``has_brake_temp``),
+        rows sit between y=86 (under the temp label) and y=168 (above
+        the pressure icon). Without it, rows take the entire column
+        from y=2 down to y=168 — a single visible bar pins to the top,
+        two or three bars spread evenly across the span.
+        """
         self._pad_w_max = max(self._pad_w_max, d.pad_w)
         self._disc_w_max = max(self._disc_w_max, d.disc_w)
+
+        # (title, value, max_obs, yellow_threshold, red_threshold)
+        rows: list[tuple[str, float, float, float, float]] = []
+        if d.has_disc_wear:
+            rows.append(("Disk Wear", d.disc_w, self._disc_w_max, 0.5, 0.2))
+        if d.has_pad_wear:
+            rows.append(("Pads Wear", d.pad_w, self._pad_w_max, 0.5, 0.2))
+        if d.has_tire_wear:
+            rows.append(("Tire Wear", d.tire_w, 1.0, 0.75, 0.40))
+        if not rows:
+            return
 
         bar_x = self._x_left(70.0, 60.0)
         bar_w = 60.0
@@ -466,12 +468,24 @@ class WheelView(DraggableWidget):
         title_h = 12.0
         title_rect_x = self._x_left(50.0, 100.0)
         title_rect_w = 100.0
+        row_h = title_h + 2.0 + bar_h
 
-        rows = (
-            ("Disk Wear", d.disc_w, self._disc_w_max, 90.0),
-            ("Pads Wear", d.pad_w, self._pad_w_max, 122.0),
-        )
-        for title, value, max_obs, row_y in rows:
+        top_y = 86.0 if d.has_brake_temp else 2.0
+        bottom_y = 168.0  # ~3 px above the pressure icon at y=171
+        span = bottom_y - top_y
+        n = len(rows)
+
+        # Single bar pins to the top of the available span — floating a
+        # lone bar in the middle of empty space looks unmoored. Two or
+        # three bars spread evenly with N+1 identical gaps so the column
+        # reads as a balanced stack regardless of which game is feeding.
+        if n == 1:
+            y_positions = [top_y]
+        else:
+            gap = (span - n * row_h) / (n + 1)
+            y_positions = [top_y + gap + i * (row_h + gap) for i in range(n)]
+
+        for (title, value, max_obs, yellow_at, red_at), row_y in zip(rows, y_positions):
             p.setFont(label_font(10))
             p.setPen(Colors.white)
             p.drawText(QRectF(title_rect_x, row_y, title_rect_w, title_h),
@@ -484,9 +498,9 @@ class WheelView(DraggableWidget):
 
             ratio = (value / max_obs) if max_obs > 0.0 else 1.0
             ratio = max(0.0, min(1.0, ratio))
-            if ratio > 0.5:
+            if ratio > yellow_at:
                 color = Colors.green
-            elif ratio > 0.2:
+            elif ratio > red_at:
                 color = Colors.yellow
             else:
                 color = Colors.red

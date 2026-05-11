@@ -13,6 +13,7 @@ from .sources import make_source
 from .telemetry import TelemetryFrame
 from .tray import make_tray
 from .widgets.countdown import CountdownView
+from .widgets.detection import DetectionView
 from .widgets.engine_view import EngineView
 from .widgets.inputs_view import InputsView
 from .widgets.wheel_view import WheelView
@@ -188,12 +189,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="overlay", description="AC Evo telemetry overlay")
     parser.add_argument(
         "--source",
-        choices=("synthetic", "ac-evo", "ac1", "acc", "acrally"),
-        default="ac-evo",
-        help=("telemetry source: 'ac-evo' (default, Assetto Corsa Evo), "
-              "'ac1' (original Assetto Corsa), 'acc' (Assetto Corsa "
-              "Competizione), 'acrally' (Assetto Corsa Rally), "
-              "or 'synthetic' (mock data)"),
+        choices=("auto", "synthetic", "ac-evo", "ac1", "acc", "acrally"),
+        default="auto",
+        help=("telemetry source: 'auto' (default, detect the running game), "
+              "'ac-evo' (Assetto Corsa Evo), 'ac1' (original Assetto Corsa), "
+              "'acc' (Assetto Corsa Competizione), 'acrally' (Assetto Corsa "
+              "Rally), or 'synthetic' (mock data)"),
     )
     parser.add_argument("--hz", type=int, default=60, help="sample rate in Hz (default: 60)")
     return parser.parse_args(argv)
@@ -287,23 +288,36 @@ def run(argv: list[str] | None = None) -> int:
 
     countdown.finished.connect(_reveal_widgets)
 
-    source = make_source(args.source, hz=args.hz, parent=window)
-    source.frame.connect(lambda f: _on_frame(f, engine, inputs, wheels))
-    source.start()
-
-    print(
-        f"[overlay] source={args.source} hz={args.hz} "
-        f"screen={geom.width()}x{geom.height()} "
-        f"resolution={layout.resolution_name} multiplier={layout.multiplier:.2f} "
-        f"engine={layout.engine.w}x{layout.engine.h} "
-        f"wheel={layout.wheels['FL'].w}x{layout.wheels['FL'].h}"
-    )
+    def _start_source(name: str) -> None:
+        source = make_source(name, hz=args.hz, parent=window)
+        source.frame.connect(lambda f: _on_frame(f, engine, inputs, wheels))
+        source.start()
+        # Keep a reference on the window so the QObject isn't GC'd when
+        # this closure returns.
+        window._source = source
+        print(
+            f"[overlay] source={name} hz={args.hz} "
+            f"screen={geom.width()}x{geom.height()} "
+            f"resolution={layout.resolution_name} multiplier={layout.multiplier:.2f} "
+            f"engine={layout.engine.w}x{layout.engine.h} "
+            f"wheel={layout.wheels['FL'].w}x{layout.wheels['FL'].h}"
+        )
+        countdown.start()
 
     window.show()
     # Default to click-through ON: a full-screen overlay must not steal mouse
     # input from the game underneath. User can toggle with Ctrl+Alt+L.
     window.toggle_click_through()
-    countdown.start()
+
+    if args.source == "auto":
+        detection = DetectionView(window)
+        detection.setGeometry(0, 0, layout.screen_w, layout.screen_h)
+        detection.raise_()
+        detection.detected.connect(_start_source)
+        window._detection = detection
+        detection.start()
+    else:
+        _start_source(args.source)
     return app.exec()
 
 

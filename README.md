@@ -41,69 +41,94 @@ Or use `run.bat`, which uses the venv's Python directly (no activation needed).
 ### Command-line flags
 
 ```bash
-python -m overlay --source ac-evo      # default — live Assetto Corsa Evo
-python -m overlay --source acc         # Assetto Corsa Competizione
-python -m overlay --source acrally     # Assetto Corsa Rally
-python -m overlay --source ac1         # original Assetto Corsa
+python -m overlay                      # default — auto-detect the running game
+python -m overlay --source ac-evo      # force Assetto Corsa Evo
+python -m overlay --source acc         # force Assetto Corsa Competizione
+python -m overlay --source acrally     # force Assetto Corsa Rally
+python -m overlay --source ac1         # force original Assetto Corsa
 python -m overlay --source synthetic   # animated mock data, no game required
 python -m overlay --hz 120             # sample rate in Hz (default: 60)
 ```
 
-All four live sources attach via Win32 `OpenFileMappingW`. If the chosen game
-isn't running the overlay polls quietly once a second and connects automatically
-when the game starts publishing.
+In `auto` mode the overlay shows a *Detecting AC Environment...* message and
+polls the Win32 shared-memory namespace (`acevo_pmf_*` vs `acpmf_*`) plus the
+running-process list every 500 ms. The countdown starts as soon as one of the
+supported games is found. All four live sources attach via Win32
+`OpenFileMappingW`; explicit `--source` overrides skip detection and start
+their reader immediately.
 
 **Important:** AC1, ACC, and AC Rally publish under the *same* shared-memory
 tag names (`Local\acpmf_*`) — only one of those games can run at a time
 anyway, and the `--source` flag tells the overlay which struct layout to
 apply. Attaching with the wrong layout reads garbage values.
 
-**On AC1**, AC Evo-only fields don't exist (`current_bhp`, per-aid
-`*_in_action` flags, `padLife` / `discLife`, normalised temps / pressure, the
-per-wheel `lock` flag). Fallbacks: live BHP from the synthesised power curve,
-lock / ABS-active inferred from a wheel-slip threshold under braking,
-normalised temps from interpolating the default tyre-temp curve, normalised
-pressure assumes a fixed 26 psi cold ideal. Brake-pad / disc wear bars stay
-full since AC1 doesn't publish that data.
+### Per-game support matrix
 
-**On ACC**, the physics block matches AC Evo's layout, so live BHP, slip,
-`tcInAction` / `absInAction`, `padLife` / `discLife`, `currentMaxRpm` all
-work. A handful of fields are in the struct but **ACC never writes to
-them** (the PDF colour-codes them as unused; the colour is lost when
-extracting the PDF text). Confirmed empirically as flat zero against a
-running game:
+Each game publishes a different subset of the per-widget signals. The
+table below summarises what renders live data, what falls back to a
+heuristic, and what hides entirely. For the shared-memory layouts and
+why these differences exist, see [`MEMORY.md`](MEMORY.md).
 
-| Field | Effect on the overlay |
-|---|---|
-| `camberRAD` | Tire silhouette stays upright (no rotation). |
-| `rideHeight` | Ride-height icon and label hidden entirely (rather than displaying a stuck zero). |
-| `wheelLoad` | Load circle and contact-patch bars hidden entirely. |
-| `tyreTempI/M/O` | Per-face IMO grid falls back to core temperature — all three cells render the same colour. |
+| Widget / signal | AC Evo | AC1 | ACC | AC Rally |
+|---|:---:|:---:|:---:|:---:|
+| Engine bar (RPM, gear, speed, gas/brake) | live | live | live | live |
+| Live BHP / torque | live | curve | live | curve |
+| `currentMaxRpm` redline | live | static | live | live |
+| Driver-aid chips (TC/ABS/DRS/ERS/…) | full | partial | partial | partial |
+| Analog readouts (water/oil temp, pressures, fuel) | full | partial | partial | partial |
+| Performance-mode label | live | — | — | — |
+| Inputs widget (pedals, steering, FFB, G-meter) | live | live | live | live |
+| Tire core temperature | live | live | live | live (K→°C) |
+| Tire I/M/O per-face temperatures | live | live | core fallback | core fallback |
+| Normalised tire temps / pressure | live | curve fallback | curve fallback | curve fallback |
+| Camber tire rotation | live | live | upright | upright |
+| Contact-patch bars | live | live | hidden | hidden |
+| Tire load circle | live | live | hidden | live |
+| Suspension travel bar | live | live | live | live |
+| Ride-height icon | live | live | hidden | hidden |
+| Brake disc temperature | live | hidden | live | live (K→°C) |
+| Per-wheel lock blink | game flag | slip heuristic | slip heuristic | slip heuristic |
+| ABS-modulating blink | game flag | slip heuristic | game flag | game flag |
+| Brake pad / disc wear bars | live | — | live | live (unknown scale) |
+| Tire wear bar | dead in game | live (%) | live (%) | live (%) |
+| Tire dirt overlay | live | live | live | live |
+| Wheel ID + compound name | per-axle | uniform | uniform | uniform |
 
-The PDF mis-types `currentMaxRpm` as `float`; in reality ACC writes it
-as `int32` like AC Evo. The source reads it as int32 (mistyping it
-would peg the RPM bar at 100 %). Per-wheel `lock` uses the same slip
-heuristic as AC1. Normalised pressure assumes 26 psi cold ideal;
-`tyreWear` is treated as AC1-style "% remaining". Source: ACC Shared
-Memory Documentation v1.8.12 (bundled at the repo root).
+**Legend.** *live* = real-time signal from the game · *curve* =
+synthesised from a built-in default curve · *core fallback* = missing
+signal replaced with core temperature · *static* = read once at session
+load · *partial* = only the fields that exist in that game's struct ·
+*slip heuristic* = inferred from `wheelSlip` threshold under braking ·
+*hidden* = widget element isn't drawn · *—* = unsupported on that game.
 
-**On AC Rally**, the physics block uses the same 800-byte layout as
-AC Evo and ACC (verified via `tools/probe_rally_layout.py` against a
-running game). Key differences from ACC:
+### Game-specific notes
 
-| Field | AC Rally behaviour |
-|---|---|
-| Temperatures (`tyreCoreTemp`, `brakeTemp`, `waterTemp`, `tyreTemp`) | Published in **Kelvin** — source subtracts 273.15 to land Celsius. |
-| `wheelLoad` | **Populated** (unlike ACC) — load circle works. |
-| `camberRAD`, `rideHeight`, `tyreTempI/M/O` | Not populated (same as ACC). Ride-height icon hidden; IMO falls back to core temp; tire silhouette renders upright. The contact-patch bars are also hidden because their height heuristic is `camber × pressure × load` and without a real camber signal they'd over-promise what they're showing. |
-| `padLife` / `discLife` | Published at an unknown scale (~1e-5 at session start, vs ACC's 0..1). The brake-wear bars' rolling-max calibration absorbs this — they start full and shrink correctly. |
-| Static block | Written lazily — reads zeros in menus, populated in-session. The source guards every assignment. |
-| `currentMaxRpm` | Int32 like AC Evo (same denormal trap if mistyped). |
+**Tag-name collision.** AC1, ACC, and AC Rally all publish under
+`Local\acpmf_*` — only one of those games can run at a time anyway, and
+the `--source` flag tells the overlay which struct layout to apply.
+Attaching with the wrong layout reads garbage. AC Evo uses its own
+`Local\acevo_pmf_*` namespace.
 
-`tyreWear` treated as AC1-style "% remaining"; normalised pressure
-assumes the same 26 psi default ideal, which reads as "over-pressure"
-on rally tires that typically run higher — the underlying psi value is
-still correct.
+**AC Rally** publishes all temperatures (tire core, brake, water,
+exhaust) in **Kelvin** — the source applies −273.15 across the board.
+`wheelLoad` IS populated (unlike ACC) so the load circle works, but
+`camberRAD`, `rideHeight`, and `tyreTempI/M/O` are not (verified
+empirically via `tools/inspect_acrally.py`).
+
+**ACC** never writes `camberRAD`, `rideHeight`, `wheelLoad`, or per-face
+`tyreTempI/M/O` even though the slots exist in the struct (the v1.8.12
+PDF colour-codes them as unused). The PDF also mis-types `currentMaxRpm`
+as `float`; ACC actually writes `int32` like AC Evo (the source reads
+it as int32 to avoid the denormal trap that would peg the RPM bar at
+100 %). Source: bundled `ACCSharedMemoryDocumentationV1.8.12.pdf`.
+
+**AC1** doesn't expose live BHP, per-aid `*_in_action` flags, brake
+pad/disc life, normalised temps/pressure, or a per-wheel lock flag — the
+overlay falls back to the synthesised power curve, slip-threshold
+heuristics, and curve-interpolated norms.
+
+**AC Evo** has the most complete coverage; the field-by-field reference
+is in [`docs/SHARED_MEMORY.md`](docs/SHARED_MEMORY.md).
 
 ---
 
@@ -369,8 +394,8 @@ list since the previous tag.
 # 1. Bump version in pyproject.toml.
 # 2. Add the new ## [X.Y.Z] section to CHANGELOG.md (Keep a Changelog format).
 # 3. Tag and push.
-git tag v0.5.1
-git push origin v0.5.1
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
 The release page populates a couple of minutes later — no manual upload

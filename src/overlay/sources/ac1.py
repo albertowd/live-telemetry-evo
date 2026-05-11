@@ -444,6 +444,12 @@ class AcTelemetrySource(TelemetrySource):
             # against the per-car / per-compound real ideal, but better
             # than pinning to 1.0 = "always green".
             w.tire_p_norm = w.tire_p / _AC1_IDEAL_PSI if _AC1_IDEAL_PSI > 0 else 1.0
+            # The synth above is a rough psi/26 approximation: fine for
+            # the pressure icon's colour but too inaccurate for the
+            # contact-patch heuristic (a 30 % deviation collapses a
+            # whole zone). Flag the norm as unreliable so the bars
+            # ignore pressure and render off camber + load only.
+            w.has_pressure_norm = False
 
             w.tire_t_c = float(ph.tyreCoreTemperature[idx])
             w.tire_t_i = float(ph.tyreTempI[idx])
@@ -457,15 +463,23 @@ class AcTelemetrySource(TelemetrySource):
             w.tire_t_norm_m = self._tire_curve.interpolate(w.tire_t_m)
             w.tire_t_norm_o = self._tire_curve.interpolate(w.tire_t_o)
 
+            # AC1's brakeTemp slot is never written by the game — it sits
+            # at the initial ambient (~12 °C) all session. Mark the signal
+            # unavailable so the widget hides the temperature label and
+            # falls back to a neutral icon tint instead of misleading.
             w.brake_t = float(ph.brakeTemp[idx])
             w.brake_t_norm = self._brake_curve.interpolate(w.brake_t)
+            w.has_brake_temp = False
 
             # AC1's tyreWear is % remaining (100 fresh, 0 bald). Convert
             # to the overlay's "remaining grip" convention (1.0 fresh).
             wear_pct = float(ph.tyreWear[idx])
             w.tire_w = max(0.0, min(1.0, wear_pct / 100.0))
-            # AC1 doesn't publish brake-pad or disc life — leave the
-            # defaults (1.0 = fresh) so the wear bars stay full.
+            # AC1's SDK predates padLife / discLife — the fields aren't in
+            # the physics struct at all. Hide the brake-wear bars instead
+            # of rendering stuck-fresh values that would mislead the user.
+            w.has_pad_wear = False
+            w.has_disc_wear = False
 
     def _apply_graphics(self, gr: _SPageFileGraphic) -> None:
         """Pull the few graphics-block fields the overlay uses on AC1.

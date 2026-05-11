@@ -25,6 +25,10 @@ class CountdownView(QWidget):
         self._remaining = self.DURATION_S
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        # Stay hidden until start() — otherwise child widgets become
+        # visible as soon as the top-level window shows, which would
+        # paint the initial "5" on top of the detection screen.
+        self.hide()
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
