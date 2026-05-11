@@ -3,12 +3,12 @@
 ![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/preview.webp)
 
 Transparent, always-on-top desktop overlay that displays live engine and per-wheel
-telemetry on top of **Assetto Corsa Evo** (or any other window). Built with **PySide6**
-and ported from the original AC1 *LiveTelemetry* plugin.
+telemetry on top of **Assetto Corsa Evo** *or* the original **Assetto Corsa**.
+Built with **PySide6** and ported from the original AC1 *LiveTelemetry* plugin.
 
-The overlay reads AC Evo's three named shared-memory blocks (`Local\acevo_pmf_physics`,
-`…_graphics`, `…_static`) when the game is running, or falls back to a synthetic data
-generator for development and screenshots.
+The overlay reads the game's three named shared-memory blocks (AC Evo:
+`Local\acevo_pmf_*`; AC1: `Local\acpmf_*`) when a game is running, or falls back to
+a synthetic data generator for development and screenshots.
 
 ---
 
@@ -39,13 +39,24 @@ Or use `run.bat`, which uses the venv's Python directly (no activation needed).
 ### Command-line flags
 
 ```bash
-python -m overlay --source synthetic   # default — animated mock data, no game required
-python -m overlay --source ac-evo      # live AC Evo shared memory (game must be running)
+python -m overlay --source ac-evo      # default — live AC Evo shared memory
+python -m overlay --source ac1         # live original Assetto Corsa shared memory
+python -m overlay --source synthetic   # animated mock data, no game required
 python -m overlay --hz 120             # sample rate in Hz (default: 60)
 ```
 
-The `ac-evo` source attaches via Win32 `OpenFileMappingW`. If the game isn't running it
-polls quietly once a second and connects automatically when AC Evo starts publishing.
+Both live sources attach via Win32 `OpenFileMappingW`. If the chosen game isn't
+running the overlay polls quietly once a second and connects automatically when
+the game starts publishing.
+
+**On AC1 specifically**, a few AC Evo-only fields don't exist in the older game's
+shared memory (`current_bhp`, per-aid `*_in_action` flags, per-wheel `padLife` /
+`discLife`, normalised temps / pressure, the per-wheel `lock` flag). The source
+fills them in with sensible fallbacks: live BHP falls back to the synthesised
+power curve, lock/ABS-active are inferred from a wheel-slip threshold under
+braking, normalised temps come from interpolating the default tyre-temp curve,
+and normalised pressure assumes a fixed 26 psi cold ideal. Brake-pad / disc
+wear bars stay full because AC1 doesn't publish that data either way.
 
 ---
 
@@ -357,8 +368,10 @@ src/overlay/
 ├── telemetry.py               # data shapes (TelemetryFrame / EngineData / WheelData)
 ├── sources/
 │   ├── base.py                # TelemetrySource (Qt object emitting `frame`)
-│   ├── synthetic.py           # mock data generator (default)
-│   ├── ac_evo.py              # AC Evo shared-memory reader (Win32 OpenFileMappingW)
+│   ├── synthetic.py           # mock data generator
+│   ├── ac_evo.py              # AC Evo shared-memory reader
+│   ├── ac1.py                 # original Assetto Corsa shared-memory reader
+│   ├── _win32_mapping.py      # NamedMapping (OpenFileMappingW) shared by ac_evo + ac1
 │   └── dump.py                # `python -m overlay.sources.dump` for SHM debugging
 └── widgets/
     ├── countdown.py           # full-screen 5 s countdown shown at startup

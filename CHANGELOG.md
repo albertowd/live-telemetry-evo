@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Original Assetto Corsa support** via a new `--source ac1` flag.
+  Reads AC1's `Local\acpmf_*` shared-memory blocks with the SDK
+  struct layout. Fields AC Evo added but AC1 doesn't publish
+  (`current_bhp`, per-aid `*_in_action`, `padLife` / `discLife`,
+  normalised temps / pressure, per-wheel `lock`) fall back to the
+  synthesised power curve, slip-threshold heuristics, and
+  curve-interpolated norms — widgets render sensible signals on
+  both games.
 - **Tire rotates by camber** on each wheel widget — silhouette,
   IMO grid and dirt overlay tilt around the tire centre (×2 visual
   amplification), consistent across left and right wheels.

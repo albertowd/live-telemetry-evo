@@ -188,9 +188,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="overlay", description="AC Evo telemetry overlay")
     parser.add_argument(
         "--source",
-        choices=("synthetic", "ac-evo"),
+        choices=("synthetic", "ac-evo", "ac1"),
         default="ac-evo",
-        help="telemetry source: 'ac-evo' (default, live game) or 'synthetic' (mock data)",
+        help=("telemetry source: 'ac-evo' (default, live Assetto Corsa Evo), "
+              "'ac1' (original Assetto Corsa), or 'synthetic' (mock data)"),
     )
     parser.add_argument("--hz", type=int, default=60, help="sample rate in Hz (default: 60)")
     return parser.parse_args(argv)
