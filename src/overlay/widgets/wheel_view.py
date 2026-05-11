@@ -287,11 +287,13 @@ class WheelView(DraggableWidget):
         above; mixing it into the contact patch made the two harder to
         compare at a glance.
 
-        Hidden entirely when the source flags ``has_wheel_load`` False —
-        without a real load signal (ACC's case) the bars degenerate to
-        a constant floor pattern that's worse than nothing.
+        Hidden entirely when the source flags either ``has_wheel_load``
+        or ``has_camber`` False — without one of those signals the bars
+        degenerate to a constant floor pattern (ACC) or a pressure-only
+        indicator that misrepresents what the heuristic claims to show
+        (AC Rally).
         """
-        if not d.has_wheel_load:
+        if not d.has_wheel_load or not d.has_camber:
             return
         band_x = 188.0
         band_w = 136.0      # mirror the IMO band width above

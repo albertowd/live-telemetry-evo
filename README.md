@@ -3,13 +3,14 @@
 ![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/preview.webp)
 
 Transparent, always-on-top desktop overlay that displays live engine and per-wheel
-telemetry on top of **Assetto Corsa Evo**, the original **Assetto Corsa**, or
-**Assetto Corsa Competizione**. Built with **PySide6** and ported from the
-original AC1 *LiveTelemetry* plugin.
+telemetry on top of **Assetto Corsa Evo**, the original **Assetto Corsa**,
+**Assetto Corsa Competizione**, or **Assetto Corsa Rally**. Built with **PySide6**
+and ported from the original AC1 *LiveTelemetry* plugin.
 
 The overlay reads the game's three named shared-memory blocks (AC Evo:
-`Local\acevo_pmf_*`; AC1 and ACC: `Local\acpmf_*`) when a game is running, or
-falls back to a synthetic data generator for development and screenshots.
+`Local\acevo_pmf_*`; AC1, ACC, and AC Rally all share `Local\acpmf_*`) when a
+game is running, or falls back to a synthetic data generator for development
+and screenshots.
 
 ---
 
@@ -42,19 +43,20 @@ Or use `run.bat`, which uses the venv's Python directly (no activation needed).
 ```bash
 python -m overlay --source ac-evo      # default — live Assetto Corsa Evo
 python -m overlay --source acc         # Assetto Corsa Competizione
+python -m overlay --source acrally     # Assetto Corsa Rally
 python -m overlay --source ac1         # original Assetto Corsa
 python -m overlay --source synthetic   # animated mock data, no game required
 python -m overlay --hz 120             # sample rate in Hz (default: 60)
 ```
 
-All three live sources attach via Win32 `OpenFileMappingW`. If the chosen game
+All four live sources attach via Win32 `OpenFileMappingW`. If the chosen game
 isn't running the overlay polls quietly once a second and connects automatically
 when the game starts publishing.
 
-**Important:** AC1 and ACC publish under the *same* shared-memory tag names
-(`Local\acpmf_*`) — only one of those games can be running at a time anyway,
-and the `--source` flag tells the overlay which struct layout to apply.
-Attaching with the wrong layout reads garbage values.
+**Important:** AC1, ACC, and AC Rally publish under the *same* shared-memory
+tag names (`Local\acpmf_*`) — only one of those games can run at a time
+anyway, and the `--source` flag tells the overlay which struct layout to
+apply. Attaching with the wrong layout reads garbage values.
 
 **On AC1**, AC Evo-only fields don't exist (`current_bhp`, per-aid
 `*_in_action` flags, `padLife` / `discLife`, normalised temps / pressure, the
@@ -84,6 +86,24 @@ would peg the RPM bar at 100 %). Per-wheel `lock` uses the same slip
 heuristic as AC1. Normalised pressure assumes 26 psi cold ideal;
 `tyreWear` is treated as AC1-style "% remaining". Source: ACC Shared
 Memory Documentation v1.8.12 (bundled at the repo root).
+
+**On AC Rally**, the physics block uses the same 800-byte layout as
+AC Evo and ACC (verified via `tools/probe_rally_layout.py` against a
+running game). Key differences from ACC:
+
+| Field | AC Rally behaviour |
+|---|---|
+| Temperatures (`tyreCoreTemp`, `brakeTemp`, `waterTemp`, `tyreTemp`) | Published in **Kelvin** — source subtracts 273.15 to land Celsius. |
+| `wheelLoad` | **Populated** (unlike ACC) — load circle works. |
+| `camberRAD`, `rideHeight`, `tyreTempI/M/O` | Not populated (same as ACC). Ride-height icon hidden; IMO falls back to core temp; tire silhouette renders upright. The contact-patch bars are also hidden because their height heuristic is `camber × pressure × load` and without a real camber signal they'd over-promise what they're showing. |
+| `padLife` / `discLife` | Published at an unknown scale (~1e-5 at session start, vs ACC's 0..1). The brake-wear bars' rolling-max calibration absorbs this — they start full and shrink correctly. |
+| Static block | Written lazily — reads zeros in menus, populated in-session. The source guards every assignment. |
+| `currentMaxRpm` | Int32 like AC Evo (same denormal trap if mistyped). |
+
+`tyreWear` treated as AC1-style "% remaining"; normalised pressure
+assumes the same 26 psi default ideal, which reads as "over-pressure"
+on rally tires that typically run higher — the underlying psi value is
+still correct.
 
 ---
 
@@ -399,6 +419,7 @@ src/overlay/
 │   ├── ac_evo.py              # AC Evo shared-memory reader
 │   ├── ac1.py                 # original Assetto Corsa shared-memory reader
 │   ├── acc.py                 # Assetto Corsa Competizione shared-memory reader
+│   ├── acrally.py             # Assetto Corsa Rally shared-memory reader
 │   ├── _win32_mapping.py      # NamedMapping (OpenFileMappingW) shared by all live readers
 │   └── dump.py                # `python -m overlay.sources.dump` for SHM debugging
 └── widgets/

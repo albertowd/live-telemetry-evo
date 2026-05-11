@@ -22,6 +22,9 @@ def make_source(name: str, hz: int = 60, parent=None) -> TelemetrySource:
     if name == "acc":
         from .acc import AccTelemetrySource  # pylint: disable=import-outside-toplevel
         return AccTelemetrySource(hz=hz, parent=parent)
+    if name == "acrally":
+        from .acrally import AcRallyTelemetrySource  # pylint: disable=import-outside-toplevel
+        return AcRallyTelemetrySource(hz=hz, parent=parent)
     raise ValueError(f"unknown telemetry source: {name!r}")
 
 

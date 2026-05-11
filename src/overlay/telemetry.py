@@ -46,8 +46,13 @@ class WheelData:
     # the flag False so the widget hides the corresponding indicator
     # instead of rendering a stuck zero. ACC for example writes nothing
     # to wheelLoad or rideHeight, so its source sets both to False.
+    # has_camber gates the contact-patch bars (whose height heuristic
+    # is camber × pressure × load — without camber the bars over-promise
+    # what they're showing). Doesn't affect the camber-driven tire
+    # rotation, which renders correctly when camber is 0 (just upright).
     has_wheel_load: bool = True
     has_ride_height: bool = True
+    has_camber: bool = True
 
 
 @dataclass

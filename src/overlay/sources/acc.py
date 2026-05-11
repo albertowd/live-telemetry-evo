@@ -528,12 +528,15 @@ class AccTelemetrySource(TelemetrySource):
             axle = idx // 2
             raw = float(ph.rideHeight[axle])
             w.height = raw if abs(raw) >= 1.0 else raw * 1000.0
-            # ACC doesn't write rideHeight or wheelLoad (PDF marks them
-            # unused). Tell the widget to hide the corresponding
-            # indicators rather than showing stuck-zero values that look
-            # like a bug.
+            # ACC doesn't write rideHeight, wheelLoad, or camberRAD (PDF
+            # marks them unused). Tell the widget to hide the
+            # corresponding indicators rather than showing stuck-zero
+            # values that look like a bug. has_camber being False also
+            # hides the contact-patch bars (which need a camber signal
+            # to be informative — see WheelData docstring).
             w.has_ride_height = False
             w.has_wheel_load = False
+            w.has_camber = False
 
             w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
             w.tire_l = float(ph.wheelLoad[idx])

@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Assetto Corsa Rally support** via a new `--source acrally` flag.
+  AC Rally uses the same `Local\acpmf_*` tag names as AC1 / ACC and
+  the same 800-byte physics layout as AC Evo / ACC, with three
+  game-specific quirks the source handles: (1) all temperatures
+  (tyre, brake, water, exhaust) are published in **Kelvin** — the
+  source applies a −273.15 offset; (2) `wheelLoad` IS populated
+  (unlike ACC), so the load circle and contact-patch bars work; (3)
+  `camberRAD`, `rideHeight`, `tyreTempI/M/O` aren't populated (same as
+  ACC) — ride-height hides, IMO grid falls back to core temp. Static
+  block reads zeros in menus, so `_apply_static` guards every
+  assignment. Verified live against a running game via
+  `tools/probe_rally_layout.py`.
 - **Assetto Corsa Competizione support** via a new `--source acc`
   flag. ACC's physics block matches AC Evo's 800-byte layout, so
   live BHP / slip / `padLife` / `discLife` / `currentMaxRpm` work
@@ -38,11 +50,16 @@ adheres to [Semantic Versioning](https://semver.org/).
   themselves are the ground reference.
 
 ### Changed
-- `WheelData` gains two source-capability flags (`has_wheel_load`,
-  `has_ride_height`, default True). Sources that don't publish a
-  given signal flip the flag false; the wheel widget early-returns
-  from the matching draw path so the indicator hides rather than
-  rendering a stuck value. Used by the ACC source today.
+- `WheelData` gains source-capability flags (`has_wheel_load`,
+  `has_ride_height`, `has_camber`, default True). Sources that don't
+  publish a given signal flip the flag false; the wheel widget
+  early-returns from the matching draw path so the indicator hides
+  rather than rendering a stuck value. The contact-patch bars are
+  gated on both `has_wheel_load` and `has_camber` since the bar
+  heights encode `camber × pressure × load` — without either signal
+  they'd over-promise what they're showing. ACC flips all three off;
+  AC Rally flips `has_ride_height` and `has_camber` off (its
+  wheelLoad IS published, so the load circle stays).
 - Removed the old trapezoidal camber strip — the tire rotation plus
   the contact bars replace it.
 - IMO temp grid now always shows the **inner** face on the
