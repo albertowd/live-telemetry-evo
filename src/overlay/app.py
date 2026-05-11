@@ -186,7 +186,10 @@ def _on_frame(frame: TelemetryFrame, engine: EngineView,
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="overlay", description="AC Evo telemetry overlay")
+    parser = argparse.ArgumentParser(
+        prog="overlay",
+        description="Assetto Corsa telemetry overlay (AC1 / ACC / AC Evo / AC Rally)",
+    )
     parser.add_argument(
         "--source",
         choices=("auto", "synthetic", "ac-evo", "ac1", "acc", "acrally"),

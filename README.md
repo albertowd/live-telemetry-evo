@@ -3,9 +3,9 @@
 ![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/preview.webp)
 
 Transparent, always-on-top desktop overlay that displays live engine and per-wheel
-telemetry on top of **Assetto Corsa Evo**, the original **Assetto Corsa**,
-**Assetto Corsa Competizione**, or **Assetto Corsa Rally**. Built with **PySide6**
-and ported from the original AC1 *LiveTelemetry* plugin.
+telemetry on top of **every Assetto Corsa title** — the original **Assetto Corsa**,
+**Assetto Corsa Competizione**, **Assetto Corsa Evo**, and **Assetto Corsa Rally**.
+Built with **PySide6** and ported from the original AC1 *LiveTelemetry* plugin.
 
 The overlay reads the game's three named shared-memory blocks (AC Evo:
 `Local\acevo_pmf_*`; AC1, ACC, and AC Rally all share `Local\acpmf_*`) when a
@@ -21,8 +21,9 @@ and screenshots.
 1. Build it once with `python build.py` (see [Building a redistributable
    executable](#building-a-redistributable-executable)).
 2. Double-click `dist\LiveTelemetryEvo-<version>.exe`.
-3. Start AC Evo. The overlay attaches automatically as soon as the game publishes
-   shared memory; until then it shows the synthetic mock so you can see the layout.
+3. Start any supported Assetto Corsa title. The overlay auto-detects which game
+   is running and attaches as soon as it publishes shared memory; the
+   *Detecting AC Environment...* screen stays up until then.
 4. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+Q` to quit.
 
 ### Option B — run from source
