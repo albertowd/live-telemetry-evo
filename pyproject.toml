@@ -1,7 +1,7 @@
 [project]
-name = "ac-evo-overlay"
+name = "live-telemetry-evo"
 version = "0.5.1"
-description = "Transparent always-on-top telemetry overlay for Assetto Corsa Evo"
+description = "Transparent always-on-top telemetry overlay for Assetto Corsa Evo and Assetto Corsa"
 requires-python = ">=3.10"
 dependencies = [
     "PySide6>=6.7.0",

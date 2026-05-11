@@ -204,7 +204,7 @@ def run(argv: list[str] | None = None) -> int:
     # Sets the per-user config directory QStandardPaths resolves for our
     # positions.json — without this, Qt falls back to a generic "QtProject"
     # path which is harder to find when the user wants to clear it.
-    app.setOrganizationName("LiveTelemetryAcEvo")
+    app.setOrganizationName("LiveTelemetryEvo")
     app.setApplicationName("Overlay")
 
     screen = app.primaryScreen()

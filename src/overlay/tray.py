@@ -43,7 +43,7 @@ def make_tray(
     if not QSystemTrayIcon.isSystemTrayAvailable():
         return None
     tray = QSystemTrayIcon(QIcon(str(app_icon_path())), parent)
-    tray.setToolTip("AC Evo Telemetry Overlay")
+    tray.setToolTip("Live Telemetry Evo")
 
     menu = QMenu(parent)
 

@@ -1,4 +1,4 @@
-# AC Evo Telemetry Overlay
+# Live Telemetry Evo
 
 ![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/preview.webp)
 
@@ -18,7 +18,7 @@ a synthetic data generator for development and screenshots.
 
 1. Build it once with `python build.py` (see [Building a redistributable
    executable](#building-a-redistributable-executable)).
-2. Double-click `dist\ACEvoOverlay-<version>.exe`.
+2. Double-click `dist\LiveTelemetryEvo-<version>.exe`.
 3. Start AC Evo. The overlay attaches automatically as soon as the game publishes
    shared memory; until then it shows the synthetic mock so you can see the layout.
 4. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+Q` to quit.
@@ -269,7 +269,7 @@ as "remaining grip".
 ## Persistence
 
 State is stored as a single JSON file at
-`%APPDATA%\LiveTelemetryAcEvo\Overlay\positions.json`
+`%APPDATA%\LiveTelemetryEvo\Overlay\positions.json`
 (`QStandardPaths.AppConfigLocation`).
 
 Schema:
@@ -298,7 +298,7 @@ persisted `size_index` is preserved and only changes via `Ctrl+Alt+S` or the tra
 Reads the version from `pyproject.toml`, converts `resources/img/icon.png` to
 `resources/icon.ico` (Pillow), then invokes PyInstaller in one-file windowed mode:
 
-- Output: `dist/ACEvoOverlay-<version>.exe`
+- Output: `dist/LiveTelemetryEvo-<version>.exe`
 - Bundles the `resources/img` directory so the icon PNGs ship with the binary.
 - Removes the one-folder fallback PyInstaller drops alongside the onefile binary.
 
@@ -312,7 +312,7 @@ pip install -r requirements-dev.txt
 
 `.github/workflows/release.yml` runs on every `v*` tag push. It uses
 `windows-latest` to run `python build.py`, then publishes a GitHub Release
-with the resulting `ACEvoOverlay-<version>.exe` plus a `SHA256SUMS.txt`
+with the resulting `LiveTelemetryEvo-<version>.exe` plus a `SHA256SUMS.txt`
 attached. The release body is built from two parts: the matching
 `## [<version>]` section of [`CHANGELOG.md`](CHANGELOG.md) (extracted by
 `tools/extract_changelog.py`), followed by the auto-generated PR/commit

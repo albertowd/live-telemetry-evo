@@ -2,7 +2,7 @@ name: Release
 
 # Fires when a version tag is pushed (e.g. ``git tag v0.5.0 && git push --tags``).
 # Builds the Windows one-file executable via ``python build.py`` and publishes
-# a GitHub Release with the resulting ``ACEvoOverlay-<version>.exe`` attached.
+# a GitHub Release with the resulting ``LiveTelemetryEvo-<version>.exe`` attached.
 on:
   push:
     tags:
@@ -46,15 +46,15 @@ jobs:
         # Fail fast if build.py reported success but no .exe ended up in dist/.
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path dist -Filter 'ACEvoOverlay-*.exe' | Select-Object -First 1
-          if (-not $exe) { throw 'no ACEvoOverlay-*.exe in dist/' }
+          $exe = Get-ChildItem -Path dist -Filter 'LiveTelemetryEvo-*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'no LiveTelemetryEvo-*.exe in dist/' }
           Write-Host "built $($exe.Name) ($([math]::Round($exe.Length / 1MB, 1)) MB)"
 
       - name: Compute SHA256 checksum
         # Lets users verify their download against the release notes.
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path dist -Filter 'ACEvoOverlay-*.exe' | Select-Object -First 1
+          $exe = Get-ChildItem -Path dist -Filter 'LiveTelemetryEvo-*.exe' | Select-Object -First 1
           $hash = (Get-FileHash -Algorithm SHA256 -Path $exe.FullName).Hash.ToLower()
           "$hash  $($exe.Name)" | Out-File -FilePath dist/SHA256SUMS.txt -Encoding ASCII
 
@@ -68,7 +68,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            dist/ACEvoOverlay-*.exe
+            dist/LiveTelemetryEvo-*.exe
             dist/SHA256SUMS.txt
           body_path: release_notes.md
           # Auto-generated PR/commit list is appended after ``body_path``.

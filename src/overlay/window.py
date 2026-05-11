@@ -48,7 +48,7 @@ HOTKEY_RESET_LABEL = "Ctrl+Alt+R"
 HOTKEY_SIZE_LABEL = "Ctrl+Alt+S"
 
 if sys.platform != "win32":
-    raise OSError("AC Evo Telemetry Overlay is Windows-only")
+    raise OSError("Live Telemetry Evo is Windows-only")
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 
@@ -167,7 +167,7 @@ class OverlayWindow(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self.setWindowTitle("AC Evo Telemetry Overlay")
+        self.setWindowTitle("Live Telemetry Evo")
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint

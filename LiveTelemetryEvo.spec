@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for ACEvoOverlay.
+"""PyInstaller spec for LiveTelemetryEvo.
 
 Built around the CLI flags ``build.py`` used to pass directly, plus a
 post-Analysis filter that strips Qt6 binaries the runtime never touches.
@@ -19,9 +19,9 @@ from pathlib import Path
 
 # When PyInstaller runs us, ``__file__`` isn't defined on every Python
 # version, but the spec is always invoked from the project root with
-# ``pyinstaller ACEvoOverlay.spec``, so ``Path.cwd()`` is the source root.
+# ``pyinstaller LiveTelemetryEvo.spec``, so ``Path.cwd()`` is the source root.
 ROOT = Path.cwd()
-PROJECT = "ACEvoOverlay"
+PROJECT = "LiveTelemetryEvo"
 ENTRYPOINT = ROOT / "src" / "overlay" / "__main__.py"
 RES_DIR = ROOT / "resources"
 ICON_PNG = RES_DIR / "icon.png"
@@ -30,7 +30,7 @@ ICON_ICO = RES_DIR / "icon.ico"
 
 def _read_version() -> str:
     """Mirror of ``build.py:_read_version`` — kept inline so the spec is
-    self-sufficient when run directly via ``pyinstaller ACEvoOverlay.spec``."""
+    self-sufficient when run directly via ``pyinstaller LiveTelemetryEvo.spec``."""
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     m = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
     if not m:

@@ -52,7 +52,7 @@ ICONS: tuple[str, ...] = (
 )
 
 
-_UA = "Mozilla/5.0 (compatible; ac-evo-overlay-icon-fetcher)"
+_UA = "Mozilla/5.0 (compatible; live-telemetry-evo-icon-fetcher)"
 
 
 def fetch(name: str) -> bytes:

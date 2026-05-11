@@ -2,7 +2,7 @@
 
 Reads the version from ``pyproject.toml``, converts ``resources/icon.png``
 to ``.ico`` if Pillow is available, then invokes PyInstaller in one-file
-windowed mode. Output: ``dist/ACEvoOverlay-<version>.exe``.
+windowed mode. Output: ``dist/LiveTelemetryEvo-<version>.exe``.
 
 Usage:
 
@@ -23,14 +23,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-PROJECT_NAME = "ACEvoOverlay"
+PROJECT_NAME = "LiveTelemetryEvo"
 ICON_PNG = ROOT / "resources" / "icon.png"
 ICON_ICO = ROOT / "resources" / "icon.ico"
 RES_IMG_DIR = ROOT / "resources" / "img"
 ENTRYPOINT = ROOT / "src" / "overlay" / "__main__.py"
 DIST_DIR = ROOT / "dist"
 BUILD_DIR = ROOT / "build"
-SPEC_FILE = ROOT / "ACEvoOverlay.spec"
+SPEC_FILE = ROOT / "LiveTelemetryEvo.spec"
 
 
 def _read_version() -> str:
