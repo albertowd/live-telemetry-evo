@@ -172,8 +172,10 @@ the screen, mirroring the engine bar's bottom-centre slot.
 | OUT chip       | Number of tyres currently off-track (0 hides the chip).                      |
 | MODE label     | Performance-mode preset (e.g. `WET`, `QUAL`); hidden when empty.             |
 
-Right-side wheels are mirrored so the *outer* edge always faces the screen edge. The
-icons are tinted PNGs cached as alpha masks and re-coloured every frame.
+The widget is mirrored per side so the **inner** face of the tire (IMO temp grid +
+contact-patch bars) always points toward the screen centre, and the side-column
+widgets (brake, suspension, pressure, ride-height) always point toward the screen
+edge. Icons are tinted PNGs cached as alpha masks and re-coloured every frame.
 
 ```
 ┌────────────────────────────────────────┐ FL
@@ -181,10 +183,10 @@ icons are tinted PNGs cached as alpha masks and re-coloured every frame.
 │  60×60  │   + temp grid (°C)  │   bar  │
 │  80 °C  │   + dirt overlay    │        │
 │ Disk ▓░ │   + load circle     │        │
-│ Pads ▓░ │                     │  ride  │
+│ Pads ▓░ │  (tilts by camber)  │  ride  │
 │  pres-  │                     │  hght  │
 │  sure   │                     │        │
-│  60×60  │  ── camber strip ── │        │
+│  60×60  │     ▆▆  ▂▂  ▂▂      │        │
 └────────────────────────────────────────┘
    26.4 psi      (FL / SOF)       32 mm
 ```
@@ -196,7 +198,8 @@ icons are tinted PNGs cached as alpha masks and re-coloured every frame.
 | Core temp band        | Central horizontal band over the silhouette, alpha 85 %, coloured by core temperature, with the core value in °C drawn at the centre (same luminance-based black/white text rule). |
 | Dirt overlay          | Brown rectangle that grows from the bottom of the silhouette. `tire_d` is clamped to 0…4; full overlay = wheel is filthy. |
 | Tyre-load circle      | White ring centred on the silhouette. Diameter scales linearly with vertical wheel load: **0.049 px / N**, clamped to 40…256 px. A typical static corner load (~3 000 N) fills the inner half; the ring saturates around ~5 200 N. |
-| Camber strip          | A trapezoidal strip below the silhouette. The horizontal edge stays flat; the top edge tilts proportional to `tan(camber_rad) × strip_width`, so heavy negative camber leans inward and positive camber leans outward. Visual only — there is no numeric readout. |
+| Camber rotation       | The whole tire silhouette (with its IMO temp grid and dirt overlay) **rotates around its centre** by the live `camberRAD` value, visually amplified ×2 so a typical −2.5° setup reads as a ~5° tilt. Negative camber leans the **top** of the tire toward the car centre (= toward the screen-centre side of the widget) on both left and right wheels — the per-wheel raw-camber sign flip from `camberRAD` (ac_evo.py §9.7a) is handled internally so the tilt direction is consistent across the four corners. |
+| Contact patch bars    | Three white vertical bars hanging from the tire's bottom edge **are** the ground reference (there is no separate ground line). Each bar represents a lateral face of the contact patch — `inner / middle / outer`, with **inner** on the screen-centre-facing side — and its height encodes a `camber × pressure × load` heuristic: camber decides the lateral bias (tall inner bar under negative camber), pressure decides crown vs. bow (under-inflation grows the edge bars and shrinks middle; over-inflation reverses), load scales the overall extent. AC Evo doesn't publish tyre dimensions or stiffness so the bars are a qualitative indicator, not a calibrated geometry — temperatures (the high-fidelity contact-pressure proxy) live in the IMO band on the tire itself, the bars only convey *which lateral part is touching*. |
 | Suspension bar        | Tinted suspension graphic on the **outer** side of the wheel. The colour band reflects how close to the bump-stops you are: white = mid-travel, **yellow** outside ±10 % of the calibrated max, **red** outside ±5 %. The inner fill is the original AC plugin convention — the bar **fills at full extension and shrinks as the suspension compresses** (height ∝ `1 − travel_ratio`). Counter-intuitive vs a typical "load grows" gauge but kept for parity. The max travel auto-calibrates from observation, since AC Evo no longer publishes a per-car `suspensionMaxTravel`. |
 | Brake icon (top-inner)| Tinted by **brake disc temperature** (curve peak ≈ 400 °C; cold below ~150 °C and hot above ~600 °C reduce stopping power). Per-wheel **lock** triggers a 0.5 s yellow blink; **ABS modulating on this wheel** triggers a continuous blue blink. The °C label below the icon stays in the temperature-tint colour for legibility. |
 | Disk / Pads wear bars | Two horizontal bars in the brake column between the brake-temperature label and the pressure icon, titled **`Disk Wear`** and **`Pads Wear`**. Each fills left → right (full bar = fresh) with green > 50 % life, yellow > 20 %, red below. Self-calibrated against the per-wheel max observed since session start, since AC EVO's `padLife` / `discLife` raw scale isn't pinned down — "max seen" stands in for "fresh", so the bar starts full and only shrinks. |

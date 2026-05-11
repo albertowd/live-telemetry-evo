@@ -11,7 +11,7 @@ ENGINE_LOGICAL_W = 512
 # with ``LOGICAL_H`` in ``widgets/engine_view.py``.
 ENGINE_LOGICAL_H = 148
 WHEEL_LOGICAL_W = 512
-WHEEL_LOGICAL_H = 271
+WHEEL_LOGICAL_H = 316
 # Phase 3 inputs widget — pedals + steering + FFB + G-meter + damage /
 # tyres-out / performance mode. Keep in sync with the constants in
 # ``widgets/inputs_view.py``.

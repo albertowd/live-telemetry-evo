@@ -143,7 +143,18 @@ class SyntheticTelemetrySource(TelemetrySource):
 
             w.height = 30.0 - (w.tire_l - 2500.0) * 0.001 + math.sin(t * 3.1 + (0 if is_front else 1.0)) * 1.5
 
-            w.camber = -0.03 + (corner_bias * 0.0008 if not is_left else -corner_bias * 0.0008)
+            # Nominal -1.7° static camber with tiny corner-load-driven
+            # variation (~0.7° max) standing in for body-roll compliance.
+            # Right-side raw sign is flipped vs the setup tool to mirror
+            # the real game (see ac_evo.py §9.7a); the widget's per-wheel
+            # sign correction unifies both sides back to "inner edge
+            # loaded for negative setup camber".
+            camber_static = -0.03
+            roll_delta = corner_bias * 0.00001
+            if is_left:
+                w.camber = camber_static - roll_delta
+            else:
+                w.camber = -camber_static + roll_delta
 
             target_p = 26.0 + (w.tire_t_c - 80.0) * 0.04
             w.tire_p += (target_p - w.tire_p) * 0.02

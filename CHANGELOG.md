@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Tire rotates by camber** on each wheel widget — silhouette,
+  IMO grid and dirt overlay tilt around the tire centre (×2 visual
+  amplification), consistent across left and right wheels.
+- **Contact-patch bars** below each tire: three white bars whose
+  heights encode a `camber × pressure × load` heuristic for which
+  lateral face (inner / middle / outer) is in contact. The bars
+  themselves are the ground reference.
+
+### Changed
+- Removed the old trapezoidal camber strip — the tire rotation plus
+  the contact bars replace it.
+- IMO temp grid now always shows the **inner** face on the
+  screen-centre-facing side of the widget (left wheels were inverted).
+- Wheel widget logical height bumped 271 → 316 to fit the new bars
+  and give the rotated tire top breathing room.
+- Synthetic source: right-side camber sign flipped to mirror the real
+  game; corner-load → camber coupling rescaled to realistic values.
+
 ## [0.5.1] - 2026-05-09
 
 ### Added

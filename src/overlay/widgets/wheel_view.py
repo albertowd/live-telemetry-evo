@@ -4,7 +4,7 @@ import math
 import time
 
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from ..colors import Colors
@@ -21,7 +21,14 @@ from .draggable import DraggableWidget
 
 
 LOGICAL_W = 512.0
-LOGICAL_H = 271.0
+LOGICAL_H = 316.0
+# Top padding above the tire silhouette. The rotation pivot is at the
+# tire's centre, so the top corners swing both sideways and slightly
+# downward (1 - cos θ) under camber tilt — without a margin a 5°
+# visual rotation already clips ~7 px above y = 0. 16 px handles up to
+# ~14° visual rotation, which covers any realistic camber setup at the
+# 2× amplification below.
+TOP_MARGIN = 16.0
 WARNING_TIME_S = 0.5
 LOCK_BLINK_PERIOD_S = 0.1
 # Tire-load circle: pixels of diameter per Newton. Calibrated so a
@@ -33,6 +40,22 @@ LOCK_BLINK_PERIOD_S = 0.1
 # kerb strikes, so under normal driving the circle is an accurate
 # load-magnitude indicator at every moment.
 LOAD_PX_PER_N = 0.027
+# Contact-patch model constants. The patch shape is inferred from camber
+# (lateral bias) × pressure (crown vs bow) × load (overall extent). The
+# game doesn't publish tyre dimensions or stiffness, so this is a
+# qualitative indicator — the *colour* of each segment comes from the
+# game-simulated per-face tyre temps (which already encode real contact
+# pressure × slip), the *height* is the heuristic.
+_CAMBER_FULL_BIAS_RAD = math.radians(4.0)  # ±4° = full lateral bias
+_PRESSURE_FULL_BIAS = 0.30                 # ±30% off ideal = full crown/bow
+_LOAD_FULL_N = 6000.0                       # ~6 kN = full-height patch
+_LOAD_FLOOR = 0.30                          # patch never collapses fully
+# Visual amplification of the camber tilt. Real setup camber is ±2–3°,
+# which on a 256 px-tall tire silhouette moves the bottom corners only
+# ~5 px — hard to read at a glance. 2× makes the tilt obvious without
+# changing the relationship to the underlying value (0° still renders
+# as 0°, the curve stays linear).
+_CAMBER_VIS_AMPLIFY = 2.0
 
 
 def _draw_tinted(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
@@ -116,9 +139,30 @@ class WheelView(DraggableWidget):
 
         d = self._data
 
+        # Camber rotates the tire silhouette, the IMO temp band, and the
+        # dirt overlay around the tire centre. A single negation
+        # produces the right visual for both wheel sides: raw camberRAD
+        # has a per-wheel local sign (right-side wheels flip vs the
+        # setup tool, see ac_evo.py §9.7a), and the widget's left/right
+        # screen placement is itself mirrored — the two flips cancel,
+        # so negating the raw value lands the top of the tire tilting
+        # toward screen-centre (i.e. toward the car centre) for negative
+        # setup camber on both sides, which is what a real wheel does.
+        camber_deg = -math.degrees(d.camber) * _CAMBER_VIS_AMPLIFY
+
+        p.save()
+        p.translate(256.0, TOP_MARGIN + 128.0)
+        p.rotate(camber_deg)
+        p.translate(-256.0, -(TOP_MARGIN + 128.0))
         self._draw_tire_and_temps(p, d)
         self._draw_dirt(p, d)
-        self._draw_camber(p, d)
+        p.restore()
+
+        # Contact-patch bars *are* the ground indicator — they start at
+        # the ground line and extend downward. Painted after the rotated
+        # tire so any bottom corner that dipped below the ground line
+        # gets visually clipped against the bars.
+        self._draw_contact_patch(p, d)
         self._draw_suspension(p, d)
         # Wear bar hidden: AC EVO doesn't publish tyre wear via shared
         # memory (three independent investigations, see SHARED_MEMORY.md
@@ -136,7 +180,7 @@ class WheelView(DraggableWidget):
     # --- components ---------------------------------------------------------
 
     def _draw_tire_and_temps(self, p: QPainter, d: WheelData) -> None:
-        rect = QRectF(176.0, 0.0, 160.0, 256.0)
+        rect = QRectF(176.0, TOP_MARGIN, 160.0, 256.0)
 
         # Tire silhouette tinted by composite temperature (mirrors lt_components.Tire).
         body = (d.tire_t_c * 0.75
@@ -151,8 +195,18 @@ class WheelView(DraggableWidget):
         pad = 12.0
         quarter = (rect.height() - 2.0 * pad) * 0.125
         part = (rect.width() - 2.0 * pad) / 3.0
-        inner_x = rect.x() + pad
-        outer_x = rect.x() + pad + 2.0 * part
+        # Mirror the IMO band on left-side wheels so INNER always sits
+        # on the screen-centre-facing side of the widget — the same
+        # side the rotation now visibly loads under negative camber.
+        # Right-side wheels keep INNER on the left of the widget because
+        # the overall widget layout is already mirrored (_x_left) for
+        # them, so the screen-centre-facing side is already widget-LEFT.
+        if self._is_left:
+            inner_x = rect.x() + pad + 2.0 * part
+            outer_x = rect.x() + pad
+        else:
+            inner_x = rect.x() + pad
+            outer_x = rect.x() + pad + 2.0 * part
         top_y = rect.y() + pad
 
         core_color = QColor(self._temp.interpolate_color(d.tire_t_c, d.tire_t_norm_c))
@@ -164,7 +218,14 @@ class WheelView(DraggableWidget):
         # edges on adjacent rects leave semi-transparent seams between
         # colors. Aliased rects snap consistently and meet flush.
         p.setRenderHint(QPainter.Antialiasing, False)
-        p.drawRect(QRectF(inner_x, top_y + quarter, part * 3.0, quarter * 6.0))
+        # Core block: always start at the leftmost edge of the IMO band
+        # (rect.x() + pad), not at inner_x. inner_x flips between
+        # left/right sides depending on wheel side so the INNER label
+        # lands on the screen-centre-facing column — the core block,
+        # however, is always the centred fill of the band and must stay
+        # anchored to the band's left edge regardless.
+        p.drawRect(QRectF(rect.x() + pad, top_y + quarter,
+                          part * 3.0, quarter * 6.0))
 
         edge_zones: list[tuple[float, float, QColor]] = []
         for value, norm, x in (
@@ -194,7 +255,7 @@ class WheelView(DraggableWidget):
         p.drawText(rect, Qt.AlignCenter, f"{int(d.tire_t_c)} °C")
 
     def _draw_dirt(self, p: QPainter, d: WheelData) -> None:
-        full = QRectF(188.0, 128.0, 136.0, 116.0)
+        full = QRectF(188.0, TOP_MARGIN + 128.0, 136.0, 116.0)
         dirt = max(0.0, min(4.0, d.tire_d)) / 4.0 * full.height()
         dirt_rect = QRectF(full.x(), full.bottom() - dirt, full.width(), dirt)
         c = QColor(Colors.brown)
@@ -203,23 +264,90 @@ class WheelView(DraggableWidget):
         p.setBrush(c)
         p.drawRect(dirt_rect)
 
-    def _draw_camber(self, p: QPainter, d: WheelData) -> None:
-        rect = QRectF(170.0, 256.0, 172.0, 15.0)
-        tan = math.tan(d.camber) * rect.width()
-        tan_left = -(tan if d.camber < 0.0 else 0.0)
-        tan_right = tan if d.camber > 0.0 else 0.0
-        poly = QPolygonF([
-            QPointF(rect.x(), rect.y() + tan_left),
-            QPointF(rect.x(), rect.bottom()),
-            QPointF(rect.right(), rect.bottom()),
-            QPointF(rect.right(), rect.y() + tan_right),
-        ])
+    def _draw_contact_patch(self, p: QPainter, d: WheelData) -> None:
+        """Three white bars dropping from where the ground line sits
+        (just below the tire). Together they *are* the ground indicator
+        — there is no separate ground line — and their heights encode
+        which lateral part of the contact patch is actually loaded.
+
+        Lateral convention matches the IMO band above: INNER segment
+        sits on the screen-centre-facing side of the widget, OUTER on
+        the screen-edge-facing side, MIDDLE between them.
+
+        Heuristic ("cleanest path" from the SHM survey, since the game
+        doesn't publish tyre dimensions or stiffness):
+            * camber → lateral bias (inner-loaded when sign-normalised
+              camber < 0, outer-loaded when > 0)
+            * pressure → crown vs. bow (norm > 1 → centre carries,
+              norm < 1 → edges carry, centre lifts)
+            * load → overall patch extent (scales segment height)
+
+        Bars render in solid white so the visual reads cleanly as the
+        ground reference. Temperature information lives in the IMO band
+        above; mixing it into the contact patch made the two harder to
+        compare at a glance.
+        """
+        band_x = 188.0
+        band_w = 136.0      # mirror the IMO band width above
+        band_top = TOP_MARGIN + 256.0  # flush with the tire bottom
+        band_max_h = 32.0
+        seg_w = band_w / 3.0
+
+        # Sign-correct camber so <0 = inner-edge-loaded for both sides.
+        camber_n = d.camber * (1.0 if self._is_left else -1.0)
+        # -1 = full inner bias, +1 = full outer bias, 0 = centred.
+        camber_axis = max(-1.0, min(1.0, camber_n / _CAMBER_FULL_BIAS_RAD))
+
+        # +1 = bowed (under-inflated, edges carry), -1 = crowned
+        # (over-inflated, centre carries), 0 = ideal.
+        p_bias = max(-1.0, min(1.0, (1.0 - d.tire_p_norm) / _PRESSURE_FULL_BIAS))
+
+        # Load magnitude scales the overall patch, with a floor so a
+        # stationary tire still shows *some* contact strip.
+        load_n = max(0.0, min(1.0, d.tire_l / _LOAD_FULL_N))
+        load_factor = _LOAD_FLOOR + (1.0 - _LOAD_FLOOR) * load_n
+
+        # Camber factor: inner fades out as axis → +1, outer as axis → -1,
+        # middle fades as |axis| → 1.
+        inner_camber = max(0.0, 1.0 - max(0.0, camber_axis))
+        outer_camber = max(0.0, 1.0 + min(0.0, camber_axis))
+        middle_camber = max(0.0, 1.0 - abs(camber_axis))
+
+        # Pressure factor: bowing (p_bias > 0) lifts the middle and adds
+        # load to the edges, crowning (p_bias < 0) reverses. Additive
+        # multiplier in [0, 2]; clamped by the eventual height clamp.
+        edge_press = 1.0 + p_bias
+        middle_press = 1.0 - p_bias
+
+        # Segment positions mirror the IMO band convention above:
+        # INNER on the screen-centre-facing side, OUTER on the
+        # screen-edge-facing side.
+        if self._is_left:
+            inner_x_seg = band_x + 2.0 * seg_w
+            outer_x_seg = band_x
+        else:
+            inner_x_seg = band_x
+            outer_x_seg = band_x + 2.0 * seg_w
+        middle_x_seg = band_x + seg_w
+        zones = (
+            (inner_camber * edge_press, inner_x_seg),
+            (middle_camber * middle_press, middle_x_seg),
+            (outer_camber * edge_press, outer_x_seg),
+        )
         p.setPen(Qt.NoPen)
         p.setBrush(Colors.white)
-        p.drawPolygon(poly)
+        # Aliased rects so adjacent segments meet flush at the non-integer
+        # widget scale, same trick the IMO temp grid uses.
+        p.setRenderHint(QPainter.Antialiasing, False)
+        for weight, x in zones:
+            h = max(0.0, min(1.0, weight * load_factor)) * band_max_h
+            if h < 0.5:
+                continue
+            p.drawRect(QRectF(x, band_top, seg_w, h))
+        p.setRenderHint(QPainter.Antialiasing, True)
 
     def _draw_suspension(self, p: QPainter, d: WheelData) -> None:
-        rect = QRectF(self._x_left(346.0, 64.0), 0.0, 64.0, 256.0)
+        rect = QRectF(self._x_left(346.0, 64.0), TOP_MARGIN, 64.0, 256.0)
         travel = (d.susp_t / d.susp_m_t) if d.susp_m_t > 0.0 else 0.5
 
         if travel > 0.95 or travel < 0.05:
@@ -375,7 +503,7 @@ class WheelView(DraggableWidget):
         p.drawText(label_rect, Qt.AlignCenter, f"{d.tire_p:.1f} psi")
 
     def _draw_height(self, p: QPainter, d: WheelData) -> None:
-        rect = QRectF(self._x_left(430.0, 64.0), 208.0, 64.0, 48.0)
+        rect = QRectF(self._x_left(430.0, 64.0), TOP_MARGIN + 208.0, 64.0, 48.0)
         if d.height < 20.0:
             self._height_warn_until = time.monotonic() + WARNING_TIME_S
         color = Colors.red if time.monotonic() < self._height_warn_until else Colors.white
@@ -397,7 +525,7 @@ class WheelView(DraggableWidget):
         # no minimum floor, so a wheel that goes light or off the ground
         # accurately shrinks toward zero rather than holding a fake
         # "minimum size" floor.
-        center = QPointF(256.0, 128.0)
+        center = QPointF(256.0, TOP_MARGIN + 128.0)
         diameter = max(0.0, min(160.0, d.tire_l * LOAD_PX_PER_N))
         if diameter < 1.0:
             return
