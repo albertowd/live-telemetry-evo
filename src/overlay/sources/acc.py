@@ -28,10 +28,9 @@ A few quirks worth noting upstream of the apply step:
   (the PDF marks them ``Not shown in ACC``). We fall back to the core
   temp for the per-face values so the IMO temp grid still has *something*
   to render instead of three permanent-blue cells.
-* ``tyreWear`` is unscaled in the PDF. We treat it as AC1-style "%
-  remaining" (100 = fresh, 0 = bald) since ACC inherits AC1's plugin
-  SDK; if a user reports the bar shrinking the wrong direction we
-  flip it.
+* ``tyreWear`` is in the struct but ACC never writes a meaningful value
+  to it (the slot stays at its default). We flip ``has_tire_wear`` False
+  so the wear bar hides instead of pinning a stuck-fresh value.
 * ``brakeBias`` has a per-car offset that the dash adds before display
   (see Appendix 4 in the PDF). We use the raw value as-is — close enough
   for a 0..1 widget, off by a couple of percent against the in-car
@@ -565,10 +564,11 @@ class AccTelemetrySource(TelemetrySource):
             w.pad_w = float(ph.padLife[idx])
             w.disc_w = float(ph.discLife[idx])
 
-            # ACC's tyreWear assumed AC1-style (% remaining, 100 fresh).
-            # If telemetry shows it shrinking the wrong way, invert here.
-            wear_pct = float(ph.tyreWear[idx])
-            w.tire_w = max(0.0, min(1.0, wear_pct / 100.0))
+            # ACC's ph.tyreWear slot is present in the struct but the
+            # game doesn't actually publish wear values — verified in
+            # session, the field stays at its default. Hide the bar
+            # rather than rendering a stuck-fresh value.
+            w.has_tire_wear = False
 
     def _apply_graphics(self, gr: _SPageFileGraphic) -> None:
         """ACC graphics — pull lap state + electronics + tyre compound."""

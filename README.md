@@ -1,6 +1,6 @@
 # Live Telemetry Evo
 
-![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/preview.webp)
+![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/previews/ac-evo.webp)
 
 Transparent, always-on-top desktop overlay that displays live engine and per-wheel
 telemetry on top of **every Assetto Corsa title** — the original **Assetto Corsa**,
@@ -91,7 +91,7 @@ why these differences exist, see [`MEMORY.md`](MEMORY.md).
 | Per-wheel lock blink | game flag | slip heuristic | slip heuristic | slip heuristic |
 | ABS-modulating blink | game flag | slip heuristic | game flag | game flag |
 | Brake pad / disc wear bars | live | — | live | live (unknown scale) |
-| Tire wear bar | dead in game | live (%) | live (%) | live (%) |
+| Tire wear bar | hidden | live (%) | hidden | hidden |
 | Tire dirt overlay | live | live | live | live |
 | Wheel ID + compound name | per-axle | uniform | uniform | uniform |
 

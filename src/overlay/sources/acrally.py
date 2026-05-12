@@ -289,10 +289,10 @@ class AcRallyTelemetrySource(TelemetrySource):
             w.pad_w = float(ph.padLife[idx])
             w.disc_w = float(ph.discLife[idx])
 
-            # tyreWear: same AC1-style assumption ACC uses (% remaining,
-            # 100 fresh). Flip if telemetry shows otherwise.
-            wear_pct = float(ph.tyreWear[idx])
-            w.tire_w = max(0.0, min(1.0, wear_pct / 100.0))
+            # AC Rally's tyreWear slot is in the struct but the game
+            # doesn't publish meaningful values (same as ACC). Hide
+            # the bar rather than rendering a stuck-fresh value.
+            w.has_tire_wear = False
 
     def _apply_graphics(self, gr: _SPageFileGraphic) -> None:
         """Pull the few graphics-block fields the overlay uses on AC
