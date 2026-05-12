@@ -1,8 +1,9 @@
 """Build a portable single-file ``.exe`` of the overlay.
 
-Reads the version from ``pyproject.toml``, converts ``resources/icon.png``
+Reads the version from ``pyproject.toml`` and the project name from the
+``.spec`` file's ``PROJECT`` assignment, converts ``resources/icon.png``
 to ``.ico`` if Pillow is available, then invokes PyInstaller in one-file
-windowed mode. Output: ``dist/LiveTelemetryEvo-<version>.exe``.
+windowed mode. Output: ``dist/<PROJECT>-<version>.exe``.
 
 Usage:
 
@@ -23,14 +24,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-PROJECT_NAME = "LiveTelemetryEvo"
 ICON_PNG = ROOT / "resources" / "icon.png"
 ICON_ICO = ROOT / "resources" / "icon.ico"
 RES_IMG_DIR = ROOT / "resources" / "img"
 ENTRYPOINT = ROOT / "src" / "overlay" / "__main__.py"
 DIST_DIR = ROOT / "dist"
 BUILD_DIR = ROOT / "build"
-SPEC_FILE = ROOT / "LiveTelemetryEvo.spec"
 
 
 def _read_version() -> str:
@@ -41,6 +40,29 @@ def _read_version() -> str:
     m = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
     if not m:
         raise RuntimeError("could not parse 'version' from pyproject.toml")
+    return m.group(1)
+
+
+def _find_spec() -> Path:
+    """Locate the single ``.spec`` file in the project root. The spec is
+    the source of truth for the project name (see ``_read_project_name``)."""
+    specs = sorted(ROOT.glob("*.spec"))
+    if not specs:
+        raise RuntimeError("no .spec file found in project root")
+    if len(specs) > 1:
+        names = ", ".join(s.name for s in specs)
+        raise RuntimeError(f"multiple .spec files found ({names}); expected exactly one")
+    return specs[0]
+
+
+def _read_project_name(spec: Path) -> str:
+    """Pull the ``PROJECT = "..."`` assignment out of the spec so the
+    executable name lives in one place — the spec — instead of being
+    duplicated here."""
+    text = spec.read_text(encoding="utf-8")
+    m = re.search(r'^\s*PROJECT\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
+    if not m:
+        raise RuntimeError(f"could not parse 'PROJECT' from {spec.name}")
     return m.group(1)
 
 
@@ -94,8 +116,10 @@ def _convert_icon() -> Path | None:
 
 def main() -> int:
     _ensure_pyinstaller()
+    spec_file = _find_spec()
+    project_name = _read_project_name(spec_file)
     version = _read_version()
-    final_name = f"{PROJECT_NAME}-{version}"
+    final_name = f"{project_name}-{version}"
     icon = _convert_icon()
 
     if not RES_IMG_DIR.is_dir():
@@ -105,9 +129,6 @@ def main() -> int:
         sys.stderr.write(f"[build] missing entrypoint {ENTRYPOINT}\n")
         return 1
 
-    if not SPEC_FILE.is_file():
-        sys.stderr.write(f"[build] missing spec file {SPEC_FILE}\n")
-        return 1
     # The spec file owns Analysis / EXE configuration plus the binary
     # filter that drops Qt6 DLLs we don't use (QtQuick, QtNetwork,
     # opengl32sw.dll, ...). build.py only handles the icon conversion
@@ -117,7 +138,7 @@ def main() -> int:
         sys.executable, "-m", "PyInstaller", "--noconfirm",
         "--distpath", str(DIST_DIR),
         "--workpath", str(BUILD_DIR),
-        str(SPEC_FILE),
+        str(spec_file),
     ]
 
     print(f"[build] {' '.join(cmd)}")

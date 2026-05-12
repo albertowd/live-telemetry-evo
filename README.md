@@ -1,6 +1,20 @@
 # Live Telemetry Evo
 
-![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-ac-evo/main/resources/previews/ac-evo.webp)
+## Live Telemetry Evo on AC Evo
+
+![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/ac-evo.webp)
+
+## Live Telemetry Evo on AC Rally
+
+![Overlay running on top of AC Rally](https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/ac-rally.webp)
+
+## Live Telemetry Evo on ACC
+
+![Overlay running on top of ACC](https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/acc.webp)
+
+## Live Telemetry Evo on AC1
+
+![Overlay running on top of AC1](https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/ac1.webp)
 
 Transparent, always-on-top desktop overlay that displays live engine and per-wheel
 telemetry on top of **every Assetto Corsa title** — the original **Assetto Corsa**,
@@ -16,7 +30,14 @@ and screenshots.
 
 ## Quick start
 
-### Option A — run the prebuilt executable
+### Option A — download and execute
+
+1. Go to the releases page the download the latest version from [GitHub](https://github.com/albertowd/live-telemetry-evo/releases) or [Overtake.gg](https://github.com/albertowd/live-telemetry-evo/releases).
+2. Double-click on it with the session already running so it auto detects which
+   game to load the data from.
+3. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+Q` to quit.
+
+### Option B — run the prebuilt executable
 
 1. Build it once with `python build.py` (see [Building a redistributable
    executable](#building-a-redistributable-executable)).
@@ -26,7 +47,7 @@ and screenshots.
    *Detecting AC Environment...* screen stays up until then.
 4. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+Q` to quit.
 
-### Option B — run from source
+### Option A — run from source
 
 The project uses a local virtual environment so it does not touch the system Python.
 
