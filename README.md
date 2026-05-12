@@ -2,7 +2,8 @@
 
 ## Live Telemetry Evo on AC Evo
 
-![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/ac-evo.webp)
+[![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/ac-evo.webp)](https://www.youtube.com/watch?v=r5xZroHg2QY)
+(click the image to view the Youtube vídeo)
 
 ## Live Telemetry Evo on AC Rally
 
@@ -32,7 +33,7 @@ and screenshots.
 
 ### Option A — download and execute
 
-1. Go to the releases page the download the latest version from [GitHub](https://github.com/albertowd/live-telemetry-evo/releases) or [Overtake.gg](https://github.com/albertowd/live-telemetry-evo/releases).
+1. Go to the releases page the download the latest version from [GitHub](https://github.com/albertowd/live-telemetry-evo/releases) or [Overtake.gg](https://www.overtake.gg/downloads/live-telemetry-evo.84121/).
 2. Double-click on it with the session already running so it auto detects which
    game to load the data from.
 3. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+Q` to quit.
