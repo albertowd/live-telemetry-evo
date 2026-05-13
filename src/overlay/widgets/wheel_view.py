@@ -29,6 +29,18 @@ LOGICAL_H = 316.0
 # ~14° visual rotation, which covers any realistic camber setup at the
 # 2× amplification below.
 TOP_MARGIN = 16.0
+# Tire silhouette + shared inner band (IMO temps, dirt, contact bars).
+# Logical x is given for left-side wheels; ``_x_left`` mirrors it for
+# right-side wheels. ``TIRE_X = 158`` centres the tire between the two
+# adjacent side columns: brake/pressure/wear ends at x=130 (OUTER) and
+# suspension starts at x=346 (INNER), leaving 28 px of breathing room
+# on each side. ``BAND_X = TIRE_X + 12`` keeps the band inside the
+# tire silhouette's logical 12 px padding.
+TIRE_X = 158.0
+TIRE_W = 160.0
+TIRE_H = 256.0
+BAND_X = TIRE_X + 12.0
+BAND_W = 136.0
 WARNING_TIME_S = 0.5
 LOCK_BLINK_PERIOD_S = 0.1
 # Tire-load circle: pixels of diameter per Newton. Calibrated so a
@@ -136,6 +148,9 @@ class WheelView(DraggableWidget):
             return x
         return LOGICAL_W - x - w
 
+    def _tire_center_x(self) -> float:
+        return self._x_left(TIRE_X, TIRE_W) + TIRE_W * 0.5
+
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -163,10 +178,11 @@ class WheelView(DraggableWidget):
         # setup camber on both sides, which is what a real wheel does.
         camber_deg = -math.degrees(d.camber) * _CAMBER_VIS_AMPLIFY
 
+        cx = self._tire_center_x()
         p.save()
-        p.translate(256.0, TOP_MARGIN + 128.0)
+        p.translate(cx, TOP_MARGIN + 128.0)
         p.rotate(camber_deg)
-        p.translate(-256.0, -(TOP_MARGIN + 128.0))
+        p.translate(-cx, -(TOP_MARGIN + 128.0))
         self._draw_tire_and_temps(p, d)
         self._draw_dirt(p, d)
         p.restore()
@@ -189,7 +205,7 @@ class WheelView(DraggableWidget):
     # --- components ---------------------------------------------------------
 
     def _draw_tire_and_temps(self, p: QPainter, d: WheelData) -> None:
-        rect = QRectF(176.0, TOP_MARGIN, 160.0, 256.0)
+        rect = QRectF(self._x_left(TIRE_X, TIRE_W), TOP_MARGIN, TIRE_W, TIRE_H)
 
         # Tire silhouette tinted by composite temperature (mirrors lt_components.Tire).
         body = (d.tire_t_c * 0.75
@@ -264,7 +280,7 @@ class WheelView(DraggableWidget):
         p.drawText(rect, Qt.AlignCenter, f"{int(d.tire_t_c)} °C")
 
     def _draw_dirt(self, p: QPainter, d: WheelData) -> None:
-        full = QRectF(188.0, TOP_MARGIN + 128.0, 136.0, 116.0)
+        full = QRectF(self._x_left(BAND_X, BAND_W), TOP_MARGIN + 128.0, BAND_W, 116.0)
         dirt = max(0.0, min(4.0, d.tire_d)) / 4.0 * full.height()
         dirt_rect = QRectF(full.x(), full.bottom() - dirt, full.width(), dirt)
         c = QColor(Colors.brown)
@@ -304,8 +320,8 @@ class WheelView(DraggableWidget):
         """
         if not d.has_wheel_load or not d.has_camber:
             return
-        band_x = 188.0
-        band_w = 136.0      # mirror the IMO band width above
+        band_x = self._x_left(BAND_X, BAND_W)
+        band_w = BAND_W      # mirror the IMO band width above
         band_top = TOP_MARGIN + 256.0  # flush with the tire bottom
         band_max_h = 32.0
         seg_w = band_w / 3.0
@@ -572,7 +588,7 @@ class WheelView(DraggableWidget):
         # wheelLoad (ACC) — a permanent zero-radius circle reads as a bug.
         if not d.has_wheel_load:
             return
-        center = QPointF(256.0, TOP_MARGIN + 128.0)
+        center = QPointF(self._tire_center_x(), TOP_MARGIN + 128.0)
         diameter = max(0.0, min(160.0, d.tire_l * LOAD_PX_PER_N))
         if diameter < 1.0:
             return
