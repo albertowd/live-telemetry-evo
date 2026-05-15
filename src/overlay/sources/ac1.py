@@ -482,11 +482,12 @@ class AcTelemetrySource(TelemetrySource):
         i.steering = max(-1.0, min(1.0, float(ph.steerAngle) / (math.pi / 4)))
         i.steering_deg = math.degrees(float(ph.steerAngle))
         i.ffb = max(0.0, min(1.0, abs(float(ph.finalFF))))
-        # AC1 documents accG with the same [lat, vert, long] ordering AC
-        # Evo confirmed — match the AC Evo apply step.
+        # accG layout is [lateral X, longitudinal Y, vertical Z] —
+        # matches AC Evo's official PDF, which we verified live (the
+        # earlier claim that AC1 used [lat, vert, long] was wrong).
         i.g_lat = float(ph.accG[0])
-        i.g_vert = float(ph.accG[1])
-        i.g_long = float(ph.accG[2])
+        i.g_long = float(ph.accG[1])
+        i.g_vert = float(ph.accG[2])
         i.damage = tuple(float(ph.carDamage[k]) for k in range(5))
         i.tyres_out = int(ph.numberOfTyresOut)
 

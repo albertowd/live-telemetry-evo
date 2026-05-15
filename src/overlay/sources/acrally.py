@@ -222,9 +222,11 @@ class AcRallyTelemetrySource(TelemetrySource):
         i.steering = max(-1.0, min(1.0, float(ph.steerAngle) / (math.pi / 4)))
         i.steering_deg = math.degrees(float(ph.steerAngle))
         i.ffb = max(0.0, min(1.0, abs(float(ph.finalFF))))
+        # accG layout is [lateral X, longitudinal Y, vertical Z] per the
+        # AC Evo PDF — same struct on AC Rally, verified live on Evo.
         i.g_lat = float(ph.accG[0])
-        i.g_vert = float(ph.accG[1])
-        i.g_long = float(ph.accG[2])
+        i.g_long = float(ph.accG[1])
+        i.g_vert = float(ph.accG[2])
         i.damage = tuple(float(ph.carDamage[k]) for k in range(5))
         i.tyres_out = int(ph.numberOfTyresOut)
 
