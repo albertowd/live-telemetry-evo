@@ -35,7 +35,6 @@ the only place that needs adjusting.
 from __future__ import annotations
 
 import ctypes
-import math
 import sys
 from ctypes import (c_bool, c_byte, c_char, c_float, c_int8, c_int16, c_int32,
                     c_uint8, c_uint16, c_uint32, c_uint64)
@@ -75,9 +74,17 @@ class _SPageFilePhysics(ctypes.Structure):
     forces/slip-ratio, in-action driver-aid flags, brake pad/disc life, and
     engine/vibration state. Total documented size is 800 bytes.
 
-    Notable semantic change vs AC1: ``tyreWear`` is **0.0 = new, 1.0 =
-    fully worn** — opposite of AC1's "0..100 % remaining". Callers must
-    invert.
+    Notable semantic differences vs AC1, per the PDF spec:
+      * ``tyreWear`` is **0.0 = new, 1.0 = fully worn** (opposite of
+        AC1's "0..100 % remaining"). Callers must invert.
+      * ``steerAngle`` is a **normalised -1..+1 ratio** (negative = left),
+        not the radian value AC1 publishes.
+      * ``accG`` ordering is **[lateral X, longitudinal Y, vertical Z]**.
+      * ``physics.tc`` / ``physics.abs`` are *intervention intensity*
+        (0..1 live activity). The driver-set setting level lives in
+        ``graphics.electronics.tc_level`` / ``abs_level``.
+      * ``suspensionTravel`` is compression in metres (non-negative).
+      * ``rideHeight`` is in metres (always — no per-car unit drift).
     """
 
     _pack_ = 4
@@ -232,31 +239,27 @@ _WHEEL_INDEX = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
 
 # --- AC Evo graphics-block substructs ---------------------------------------
 #
-# AC Evo's SPageFileGraphicEvo embeds several fixed-size substructs we don't
-# need to fully decode yet (Damage, Pit, Electronics, Instrumentation, etc.).
-# We model them as opaque byte blobs of the documented size so the offsets of
-# the fields we *do* care about (current_bhp, rpm_percent, max_turbo_boost,
-# tyre states…) line up correctly. Full substruct definitions can land later
-# in their own classes without touching the outer struct's layout.
-_SMEVO_DAMAGE_STATE_SIZE = 128
-_SMEVO_PITINFO_SIZE = 64
-_SMEVO_ELECTRONICS_SIZE = 128
-_SMEVO_INSTRUMENTATION_SIZE = 128
-_SMEVO_SESSION_STATE_SIZE = 256
-_SMEVO_TIMING_STATE_SIZE = 256
-_SMEVO_ASSISTS_STATE_SIZE = 64
-_SMEVO_TYRE_STATE_SIZE = 256
+# Each substruct here mirrors the official ACE_SharedFileOut_Documentation_v1
+# layout (Kunos, 2026-04-01). Field names follow the docs verbatim *except*
+# for the two known Kunos typos, which we silently correct:
+#   * SMEvoTyreState.tyre_pression   -> tyre_pressure
+#   * SPageFileGraphicEvo.car_ffb_mupliplier -> car_ffb_multiplier
+# Layout is unchanged — same offsets, same byte sizes.
+#
+# Each substruct pads itself out to the documented byte size with a trailing
+# `_reserved` blob so the outer SPageFileGraphicEvo offsets match the docs
+# exactly. Sizeof assertions at module load catch any field-order drift.
 
 
 class _SMEvoTyreState(ctypes.Structure):
-    """Per-corner tyre snapshot (256 B). Only the documented prefix is
-    decoded; the rest is reserved padding for future expansion."""
+    """SMEvoTyreState [256 B] — per-corner tyre snapshot. Embedded four
+    times in SPageFileGraphicEvo (lf, rf, lr, rr)."""
 
     _pack_ = 4
     _fields_ = [
         ("slip", c_float),
         ("lock", c_bool),
-        ("tyre_pressure", c_float),
+        ("tyre_pressure", c_float),                # docs typo: tyre_pression
         ("tyre_temperature_c", c_float),
         ("brake_temperature_c", c_float),
         ("brake_pressure", c_float),
@@ -271,35 +274,188 @@ class _SMEvoTyreState(ctypes.Structure):
         ("tyre_normalized_temperature_right", c_float),
         ("brake_normalized_temperature", c_float),
         ("tyre_normalized_temperature_core", c_float),
+        ("_reserved", c_byte * 128),
     ]
+assert ctypes.sizeof(_SMEvoTyreState) == 256, ctypes.sizeof(_SMEvoTyreState)
 
 
-# Compute padding so the tyre struct hits exactly 256 B regardless of
-# alignment quirks introduced by the bool / char[33] fields.
-_TYRE_DOCUMENTED_BYTES = ctypes.sizeof(_SMEvoTyreState)
-assert _TYRE_DOCUMENTED_BYTES <= _SMEVO_TYRE_STATE_SIZE, _TYRE_DOCUMENTED_BYTES
-
-
-class _SMEvoTyreStatePadded(ctypes.Structure):
-    """256-byte padded wrapper around the decoded tyre state, so the outer
-    graphics struct's offsets are exactly what the docs prescribe."""
+class _SMEvoDamageState(ctypes.Structure):
+    """SMEvoDamageState [128 B] — body and per-corner suspension damage
+    levels (0.0 = undamaged, 1.0 = destroyed)."""
 
     _pack_ = 4
     _fields_ = [
-        ("data", _SMEvoTyreState),
-        ("_reserved", c_byte * (_SMEVO_TYRE_STATE_SIZE - _TYRE_DOCUMENTED_BYTES)),
+        ("damage_front", c_float),
+        ("damage_rear", c_float),
+        ("damage_left", c_float),
+        ("damage_right", c_float),
+        ("damage_center", c_float),
+        ("damage_suspension_lf", c_float),
+        ("damage_suspension_rf", c_float),
+        ("damage_suspension_lr", c_float),
+        ("damage_suspension_rr", c_float),
+        ("_reserved", c_byte * 92),
     ]
+assert ctypes.sizeof(_SMEvoDamageState) == 128, ctypes.sizeof(_SMEvoDamageState)
+
+
+class _SMEvoPitInfo(ctypes.Structure):
+    """SMEvoPitInfo [64 B] — pit-stop service action status per item.
+    −1 = will not perform, 0 = completed, 1 = in progress."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("damage", c_int8),
+        ("fuel", c_int8),
+        ("tyres_lf", c_int8),
+        ("tyres_rf", c_int8),
+        ("tyres_lr", c_int8),
+        ("tyres_rr", c_int8),
+        ("_reserved", c_byte * 58),
+    ]
+assert ctypes.sizeof(_SMEvoPitInfo) == 64, ctypes.sizeof(_SMEvoPitInfo)
+
+
+class _SMEvoElectronics(ctypes.Structure):
+    """SMEvoElectronics [128 B] — driver-adjustable electronic aid and
+    setup settings. Embedded four times in SPageFileGraphicEvo (current,
+    min_limit, max_limit, is_modifiable)."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("tc_level", c_int8),
+        ("tc_cut_level", c_int8),
+        ("abs_level", c_int8),
+        ("esc_level", c_int8),
+        ("ebb_level", c_int8),
+        ("brake_bias", c_float),                   # auto-padded to offset 8
+        ("engine_map_level", c_int8),
+        ("turbo_level", c_float),                  # auto-padded to offset 16
+        ("ers_deployment_map", c_int8),
+        ("ers_recharge_map", c_float),             # auto-padded to offset 24
+        ("is_ers_heat_charging_on", c_bool),
+        ("is_ers_overtake_mode_on", c_bool),
+        ("is_drs_open", c_bool),
+        ("diff_power_level", c_int8),
+        ("diff_coast_level", c_int8),
+        ("front_bump_damper_level", c_int8),
+        ("front_rebound_damper_level", c_int8),
+        ("rear_bump_damper_level", c_int8),
+        ("rear_rebound_damper_level", c_int8),
+        ("is_ignition_on", c_bool),
+        ("is_pitlimiter_on", c_bool),
+        ("active_performance_mode", c_int8),
+        ("_reserved", c_byte * 88),
+    ]
+assert ctypes.sizeof(_SMEvoElectronics) == 128, ctypes.sizeof(_SMEvoElectronics)
+
+
+class _SMEvoInstrumentation(ctypes.Structure):
+    """SMEvoInstrumentation [128 B] — cockpit light, display, and panel
+    states. Embedded three times in SPageFileGraphicEvo (current,
+    min_limit, max_limit). display_current_page_index grew from 9 to 16
+    on 2026-03-31."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("main_light_stage", c_int8),
+        ("special_light_stage", c_int8),
+        ("cockpit_light_stage", c_int8),
+        ("wiper_level", c_int8),
+        ("rain_lights", c_bool),
+        ("direction_light_left", c_bool),
+        ("direction_light_right", c_bool),
+        ("flashing_lights", c_bool),
+        ("warning_lights", c_bool),
+        ("selected_display_index", c_int8),
+        ("display_current_page_index", c_int8 * 16),
+        ("are_headlights_visible", c_bool),
+        ("_reserved", c_byte * 101),
+    ]
+assert ctypes.sizeof(_SMEvoInstrumentation) == 128, ctypes.sizeof(_SMEvoInstrumentation)
+
+
+class _SMEvoSessionState(ctypes.Structure):
+    """SMEvoSessionState [256 B] — server-side session lifecycle info."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("phase_name", c_char * 33),
+        ("time_left", c_char * 15),
+        ("time_left_ms", c_int32),
+        ("wait_time", c_char * 15),
+        ("total_lap", c_int32),                    # auto-padded
+        ("current_lap", c_int32),
+        ("lights_on", c_int32),
+        ("lights_mode", c_int32),
+        ("lap_length_km", c_float),
+        ("end_session_flag", c_int32),
+        ("time_to_next_session", c_char * 15),
+        ("disconnected_from_server", c_bool),
+        ("restart_season_enabled", c_bool),
+        ("ui_enable_drive", c_bool),
+        ("ui_enable_setup", c_bool),
+        ("is_ready_to_next_blinking", c_bool),
+        ("show_waiting_for_players", c_bool),
+        ("_reserved", c_byte * 143),
+    ]
+assert ctypes.sizeof(_SMEvoSessionState) == 256, ctypes.sizeof(_SMEvoSessionState)
+
+
+class _SMEvoTimingState(ctypes.Structure):
+    """SMEvoTimingState [256 B] — lap timing and delta values displayed
+    on the HUD. *_p fields are sign markers: +1 slower, −1 faster, 0
+    hidden."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("current_laptime", c_char * 15),
+        ("delta_current", c_char * 15),
+        ("delta_current_p", c_int32),              # auto-padded
+        ("last_laptime", c_char * 15),
+        ("delta_last", c_char * 15),
+        ("delta_last_p", c_int32),                 # auto-padded
+        ("best_laptime", c_char * 15),
+        ("ideal_laptime", c_char * 15),
+        ("total_time", c_char * 15),
+        ("is_invalid", c_bool),
+        ("_reserved", c_byte * 138),
+    ]
+assert ctypes.sizeof(_SMEvoTimingState) == 256, ctypes.sizeof(_SMEvoTimingState)
+
+
+class _SMEvoAssistsState(ctypes.Structure):
+    """SMEvoAssistsState [64 B] — driver-assist settings currently active
+    for the player car."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("auto_gear", c_uint8),
+        ("auto_blip", c_uint8),
+        ("auto_clutch", c_uint8),
+        ("auto_clutch_on_start", c_uint8),
+        ("manual_ignition_e_start", c_uint8),
+        ("auto_pit_limiter", c_uint8),
+        ("standing_start_assist", c_uint8),
+        ("auto_steer", c_float),                   # auto-padded
+        ("arcade_stability_control", c_float),
+        ("_reserved", c_byte * 48),
+    ]
+assert ctypes.sizeof(_SMEvoAssistsState) == 64, ctypes.sizeof(_SMEvoAssistsState)
 
 
 class _SPageFileGraphic(ctypes.Structure):
     """AC Evo SPageFileGraphicEvo — HUD/graphics data, transcribed from the
-    official shared-memory documentation (Steam guide #3707421508).
+    official ACE_SharedFileOut_Documentation_v1 (Kunos, 2026-04-01).
 
-    Only the high-value fields the overlay needs are wired in; the large
-    embedded substructs (damage, pit, electronics, instrumentation, session,
-    timing, assists) are kept as opaque byte blobs so the outer offsets
-    match the documented layout. Full decoding can land later without
-    breaking anything that already works.
+    All documented substructs are fully decoded (TyreState, DamageState,
+    PitInfo, Electronics, Instrumentation, SessionState, TimingState,
+    AssistsState). Each is padded to its documented byte size so the
+    outer offsets line up exactly with what the game writes.
+
+    Kunos typos in the official docs are corrected here:
+      * car_ffb_mupliplier -> car_ffb_multiplier
+    Layout is unchanged — same offsets, same field width.
     """
 
     _pack_ = 4
@@ -369,17 +525,17 @@ class _SPageFileGraphic(ctypes.Structure):
         ("km_per_fuel_liter", c_float),
         ("current_torque", c_float),                  # Nm, live
         ("current_bhp", c_int32),                     # BHP, live
-        ("tyre_lf", _SMEvoTyreStatePadded),
-        ("tyre_rf", _SMEvoTyreStatePadded),
-        ("tyre_lr", _SMEvoTyreStatePadded),
-        ("tyre_rr", _SMEvoTyreStatePadded),
+        ("tyre_lf", _SMEvoTyreState),
+        ("tyre_rf", _SMEvoTyreState),
+        ("tyre_lr", _SMEvoTyreState),
+        ("tyre_rr", _SMEvoTyreState),
         ("npos", c_float),
         ("kers_charge_perc", c_float),
         ("kers_current_perc", c_float),
         ("control_lock_time", c_float),
-        ("car_damage", c_byte * _SMEVO_DAMAGE_STATE_SIZE),
+        ("car_damage", _SMEvoDamageState),
         ("car_location", c_int32),                    # ACEVO_CAR_LOCATION enum
-        ("pit_info", c_byte * _SMEVO_PITINFO_SIZE),
+        ("pit_info", _SMEvoPitInfo),
         ("fuel_liter_used", c_float),
         ("fuel_liter_per_lap", c_float),
         ("laps_possible_with_fuel", c_float),
@@ -388,13 +544,13 @@ class _SPageFileGraphic(ctypes.Structure):
         ("instantaneous_fuel_liter_per_km", c_float),
         ("instantaneous_km_per_fuel_liter", c_float),
         ("gear_rpm_window", c_float),
-        ("instrumentation", c_byte * _SMEVO_INSTRUMENTATION_SIZE),
-        ("instrumentation_min_limit", c_byte * _SMEVO_INSTRUMENTATION_SIZE),
-        ("instrumentation_max_limit", c_byte * _SMEVO_INSTRUMENTATION_SIZE),
-        ("electronics", c_byte * _SMEVO_ELECTRONICS_SIZE),
-        ("electronics_min_limit", c_byte * _SMEVO_ELECTRONICS_SIZE),
-        ("electronics_max_limit", c_byte * _SMEVO_ELECTRONICS_SIZE),
-        ("electronics_is_modifiable", c_byte * _SMEVO_ELECTRONICS_SIZE),
+        ("instrumentation", _SMEvoInstrumentation),
+        ("instrumentation_min_limit", _SMEvoInstrumentation),
+        ("instrumentation_max_limit", _SMEvoInstrumentation),
+        ("electronics", _SMEvoElectronics),
+        ("electronics_min_limit", _SMEvoElectronics),
+        ("electronics_max_limit", _SMEvoElectronics),
+        ("electronics_is_modifiable", _SMEvoElectronics),
         ("total_lap_count", c_int32),
         ("current_pos", c_uint32),
         ("total_drivers", c_uint32),
@@ -412,8 +568,8 @@ class _SPageFileGraphic(ctypes.Structure):
         ("race_cut_gained_time_ms", c_int32),
         ("distance_to_deadline", c_int32),
         ("race_cut_current_delta", c_float),
-        ("session_state", c_byte * _SMEVO_SESSION_STATE_SIZE),
-        ("timing_state", c_byte * _SMEVO_TIMING_STATE_SIZE),
+        ("session_state", _SMEvoSessionState),
+        ("timing_state", _SMEvoTimingState),
         ("player_ping", c_int32),
         ("player_latency", c_int32),
         ("player_cpu_usage", c_int32),
@@ -434,10 +590,14 @@ class _SPageFileGraphic(ctypes.Structure):
         ("active_cars", c_uint8),
         ("fuel_per_lap", c_float),
         ("fuel_estimated_laps", c_float),
-        ("assists_state", c_byte * _SMEVO_ASSISTS_STATE_SIZE),
+        ("assists_state", _SMEvoAssistsState),
         ("max_fuel", c_float),
         ("max_turbo_boost", c_float),
         ("use_single_compound", c_bool),
+        # Added 2026-04-01: maps each car_coordinates[i] slot to the UID
+        # of the driver occupying it ([:][0] = lower 64, [:][1] = upper 64
+        # of the 128-bit driver UID). 0/0 = empty slot.
+        ("car_ids", (c_uint64 * 2) * 60),
     ]
 
 
@@ -603,10 +763,12 @@ class AcEvoTelemetrySource(TelemetrySource):
         # to the generic 8500 default.
         if ph.currentMaxRpm > 0:
             e.max_rpm = float(ph.currentMaxRpm)
-        # tc/abs here are 0..1 *setting* strength — drives the chip's
-        # presence; the engaging-vs-idle dim is keyed off the ints below.
-        e.tc_level = float(ph.tc)
-        e.abs_level = float(ph.abs)
+        # Per PDF, physics.tc / physics.abs are *intervention intensity*
+        # (0..1, live activity), not the driver-set setting level. The
+        # setting level lives in graphics.electronics.{tc,abs}_level and
+        # is what the engine widget's "is the aid enabled?" check wants;
+        # populated in _apply_graphics. The active-cut blink is keyed off
+        # tc_in_action / abs_in_action below.
         e.pit_limiter = bool(ph.pitLimiterOn)
         # tcInAction / absInAction are the documented "currently cutting"
         # ints — the precise signal we want for the bright-vs-dim chip
@@ -628,19 +790,15 @@ class AcEvoTelemetrySource(TelemetrySource):
         i.throttle = max(0.0, min(1.0, float(ph.gas)))
         i.brake = max(0.0, min(1.0, float(ph.brake)))
         i.clutch = max(0.0, min(1.0, float(ph.clutch)))
-        # ph.steerAngle is radians, signed. Convert to a -1..1 input ratio
-        # by clipping at ±π/4 (typical lock-to-lock range divided across
-        # the steering ratio). steering_deg keeps the raw degree value
-        # for the numeric readout.
-        i.steering = max(-1.0, min(1.0, float(ph.steerAngle) / (math.pi / 4)))
-        i.steering_deg = math.degrees(float(ph.steerAngle))
+        # Per PDF, ph.steerAngle is already a normalised -1..+1 input
+        # ratio (negative = left). The signed-degree readout is populated
+        # from graphics.steer_degrees in _apply_graphics.
+        i.steering = max(-1.0, min(1.0, float(ph.steerAngle)))
         i.ffb = max(0.0, min(1.0, abs(float(ph.finalFF))))
-        # AC Evo's accG[0]=lateral, [1]=vertical, [2]=longitudinal —
-        # match the graphics-block ``g_forces_x/y/z`` ordering when we
-        # populate from there in _apply_graphics.
+        # Per PDF, accG layout is [lateral X, longitudinal Y, vertical Z].
         i.g_lat = float(ph.accG[0])
-        i.g_vert = float(ph.accG[1])
-        i.g_long = float(ph.accG[2])
+        i.g_long = float(ph.accG[1])
+        i.g_vert = float(ph.accG[2])
         i.damage = tuple(float(ph.carDamage[k]) for k in range(5))
         i.tyres_out = int(ph.numberOfTyresOut)
 
@@ -658,14 +816,10 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.abs_active = abs_modulating and braking and not w.lock and slip > 0.10
 
             w.camber = float(ph.camberRAD[idx])
-            # Most AC Evo cars publish suspensionTravel as positive metres
-            # from full extension. Some (notably cars with active /
-            # electronically managed suspension) publish a signed
-            # displacement around a static reference instead — values
-            # cluster around -0.03 at rest and swing a couple of cm on
-            # kerbs. Take the magnitude so both conventions calibrate and
-            # render identically.
-            w.susp_t = abs(float(ph.suspensionTravel[idx]))
+            # Per PDF, suspensionTravel is compression in metres
+            # (non-negative). Defensive clamp at 0 in case the game
+            # writes a transient negative during a reset / spawn.
+            w.susp_t = max(0.0, float(ph.suspensionTravel[idx]))
             # AC Evo no longer publishes the per-car suspensionMaxTravel,
             # so we calibrate susp_m_t from observation. Cars span a wide
             # range (~0.04 m on a GT3 to >0.15 m on a road car), so the
@@ -678,14 +832,10 @@ class AcEvoTelemetrySource(TelemetrySource):
                 w.susp_m_t = w.susp_t * 2.0
 
             # Ride height per axle (rideHeight[0]=front, [1]=rear).
-            # AC1 reported metres and so do most AC Evo cars (≈0.05 race,
-            # ≈0.15 road), but some chassis publish mm directly — auto-
-            # detect by magnitude so the readout doesn't blow up to ×1000
-            # on those cars. 1.0 m is well above any plausible ride
-            # height, so it's a clean threshold.
+            # Per PDF, value is always in metres; WheelData.height is in
+            # mm so convert once.
             axle = idx // 2
-            raw = float(ph.rideHeight[axle])
-            w.height = raw if abs(raw) >= 1.0 else raw * 1000.0
+            w.height = float(ph.rideHeight[axle]) * 1000.0
 
             w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
             w.tire_l = float(ph.wheelLoad[idx])  # Newtons
@@ -698,16 +848,10 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.brake_t = float(ph.brakeTemp[idx])
             w.pad_w = float(ph.padLife[idx])
             w.disc_w = float(ph.discLife[idx])
-            # Tyre wear is currently *unsourced* on AC EVO. The documented
-            # offset 120 (`tyreWear`) reads 0.0 all session, and the
-            # 740..771 block we briefly mistook for wear turned out to be
-            # brake pad/disc wear (matches the in-game pad/disc-wear
-            # readouts exactly). The real tyre-wear field hasn't been
-            # located yet — the in-game "2.98 %" and per-face OMIs are
-            # almost certainly in one of the still-opaque graphics
-            # substructs. Until then hide the bar instead of rendering
-            # the default 1.0 ("fresh") as if it were live.
-            w.has_tire_wear = False
+            # ph.tyreWear semantic per official docs: 0.0 = new, 1.0 =
+            # fully worn. WheelData.tire_w uses the opposite convention
+            # (1.0 = new) — invert.
+            w.tire_w = max(0.0, 1.0 - float(ph.tyreWear[idx]))
 
     def _apply_graphics(self, gr: _SPageFileGraphic) -> None:
         """Pull HUD/graphics fields that complement (and in places replace)
@@ -760,9 +904,21 @@ class AcEvoTelemetrySource(TelemetrySource):
         e.battery_voltage = float(gr.battery_voltage)
         e.fuel_liters = float(gr.fuel_liter_current_quantity)
 
+        # Driver-aid setting levels from the electronics substruct.
+        # PDF: graphics.electronics.{tc,abs}_level are the driver-set
+        # levels (0 = off, 1+ = enabled). The chip's "is this aid on?"
+        # check (`tc_level > 0`) needs the setting level, not the live
+        # intervention intensity in physics.tc / physics.abs.
+        e.tc_level = float(gr.electronics.tc_level)
+        e.abs_level = float(gr.electronics.abs_level)
+
         # Phase 3 — graphics-block fields for the inputs widget.
         i = self._frame.inputs
         i.handbrake = max(0.0, min(1.0, float(gr.handbrake_percent)))
+        # Per PDF, graphics.steer_degrees is the wheel rotation in
+        # degrees from centre (signed). Cleaner than computing degrees
+        # from physics.steerAngle, which is a -1..+1 ratio.
+        i.steering_deg = float(gr.steer_degrees)
         # The c_char array comes back null-padded; strip and decode.
         mode_raw = bytes(gr.performance_mode_name).rstrip(b"\x00")
         i.performance_mode = mode_raw.decode("ascii", errors="ignore").strip()
@@ -773,40 +929,31 @@ class AcEvoTelemetrySource(TelemetrySource):
         #   * tyre_normalized_pressure / temperature_* — ratios against the
         #     compound's ideal (1.0 = on target). Lets colour bands track
         #     per-compound targets instead of hard-coded reference points.
-        # The tyre's "left/right" axis is the contact-patch face viewed from
-        # outside the car: LEFT wheel → left=outer, right=inner; RIGHT
-        # wheel mirrored.
+        # Per PDF: tyre_temperature_left is the inner-edge temperature,
+        # tyre_temperature_right is the outer-edge temperature. Same
+        # mapping for all four corners (no per-wheel mirroring).
         for wid, ts in (("FL", gr.tyre_lf), ("FR", gr.tyre_rf),
                         ("RL", gr.tyre_lr), ("RR", gr.tyre_rr)):
             w = self._frame.wheels[wid]
-            w.lock = bool(ts.data.lock)
-            if ts.data.tyre_normalized_pressure > 0.0:
-                w.tire_p_norm = float(ts.data.tyre_normalized_pressure)
-            if ts.data.tyre_normalized_temperature_core > 0.0:
-                w.tire_t_norm_c = float(ts.data.tyre_normalized_temperature_core)
-            if ts.data.tyre_normalized_temperature_center > 0.0:
-                w.tire_t_norm_m = float(ts.data.tyre_normalized_temperature_center)
-            if ts.data.tyre_temperature_center > 0.0:
-                w.tire_t_m = float(ts.data.tyre_temperature_center)
-            is_left = wid[1] == "L"
-            inner_norm = (ts.data.tyre_normalized_temperature_right if is_left
-                          else ts.data.tyre_normalized_temperature_left)
-            outer_norm = (ts.data.tyre_normalized_temperature_left if is_left
-                          else ts.data.tyre_normalized_temperature_right)
-            inner_temp = (ts.data.tyre_temperature_right if is_left
-                          else ts.data.tyre_temperature_left)
-            outer_temp = (ts.data.tyre_temperature_left if is_left
-                          else ts.data.tyre_temperature_right)
-            if inner_norm > 0.0:
-                w.tire_t_norm_i = float(inner_norm)
-            if outer_norm > 0.0:
-                w.tire_t_norm_o = float(outer_norm)
-            if inner_temp > 0.0:
-                w.tire_t_i = float(inner_temp)
-            if outer_temp > 0.0:
-                w.tire_t_o = float(outer_temp)
-            if ts.data.brake_normalized_temperature > 0.0:
-                w.brake_t_norm = float(ts.data.brake_normalized_temperature)
+            w.lock = bool(ts.lock)
+            if ts.tyre_normalized_pressure > 0.0:
+                w.tire_p_norm = float(ts.tyre_normalized_pressure)
+            if ts.tyre_normalized_temperature_core > 0.0:
+                w.tire_t_norm_c = float(ts.tyre_normalized_temperature_core)
+            if ts.tyre_normalized_temperature_center > 0.0:
+                w.tire_t_norm_m = float(ts.tyre_normalized_temperature_center)
+            if ts.tyre_temperature_center > 0.0:
+                w.tire_t_m = float(ts.tyre_temperature_center)
+            if ts.tyre_normalized_temperature_left > 0.0:
+                w.tire_t_norm_i = float(ts.tyre_normalized_temperature_left)
+            if ts.tyre_normalized_temperature_right > 0.0:
+                w.tire_t_norm_o = float(ts.tyre_normalized_temperature_right)
+            if ts.tyre_temperature_left > 0.0:
+                w.tire_t_i = float(ts.tyre_temperature_left)
+            if ts.tyre_temperature_right > 0.0:
+                w.tire_t_o = float(ts.tyre_temperature_right)
+            if ts.brake_normalized_temperature > 0.0:
+                w.brake_t_norm = float(ts.brake_normalized_temperature)
             else:
                 # AC EVO leaves this at 0.0 for cars / states it doesn't
                 # compute — without a fallback the field would stick at
@@ -819,8 +966,8 @@ class AcEvoTelemetrySource(TelemetrySource):
         # Tyre compound names — duplicated across all 4 TyreStates, so we
         # read them once. ctypes c_char arrays come back as null-padded
         # bytes; strip nulls before decoding.
-        front_raw = bytes(gr.tyre_lf.data.tyre_compound_front).rstrip(b"\x00")
-        rear_raw = bytes(gr.tyre_lf.data.tyre_compound_rear).rstrip(b"\x00")
+        front_raw = bytes(gr.tyre_lf.tyre_compound_front).rstrip(b"\x00")
+        rear_raw = bytes(gr.tyre_lf.tyre_compound_rear).rstrip(b"\x00")
         front_compound = front_raw.decode("ascii", errors="ignore").strip()
         rear_compound = rear_raw.decode("ascii", errors="ignore").strip()
         self._frame.wheels["FL"].compound = front_compound

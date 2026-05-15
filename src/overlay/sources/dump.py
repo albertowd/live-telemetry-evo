@@ -158,12 +158,11 @@ def _print_parsed(reader: AcEvoSharedMemoryReader, segment: str) -> None:
               f"{'t_c':>6}  {'norm_t':>7}  {'brake_c':>8}  {'norm_b':>7}  compound(F/R)")
         for label, ts in (("FL", gr.tyre_lf), ("FR", gr.tyre_rf),
                           ("RL", gr.tyre_lr), ("RR", gr.tyre_rr)):
-            d = ts.data
-            cf = bytes(d.tyre_compound_front).rstrip(b"\x00").decode("ascii", errors="ignore")
-            cr = bytes(d.tyre_compound_rear).rstrip(b"\x00").decode("ascii", errors="ignore")
-            print(f"  {label:5}  {d.tyre_pressure:6.2f}  {d.tyre_normalized_pressure:7.3f}  "
-                  f"{d.tyre_temperature_c:6.1f}  {d.tyre_normalized_temperature_core:7.3f}  "
-                  f"{d.brake_temperature_c:8.0f}  {d.brake_normalized_temperature:7.3f}  "
+            cf = bytes(ts.tyre_compound_front).rstrip(b"\x00").decode("ascii", errors="ignore")
+            cr = bytes(ts.tyre_compound_rear).rstrip(b"\x00").decode("ascii", errors="ignore")
+            print(f"  {label:5}  {ts.tyre_pressure:6.2f}  {ts.tyre_normalized_pressure:7.3f}  "
+                  f"{ts.tyre_temperature_c:6.1f}  {ts.tyre_normalized_temperature_core:7.3f}  "
+                  f"{ts.brake_temperature_c:8.0f}  {ts.brake_normalized_temperature:7.3f}  "
                   f"{cf}/{cr}")
         # Per-face temps: hypothesised to match the game's "OMI" HUD line.
         # Print both raw °C and game-normalised so a side-by-side check
@@ -174,12 +173,11 @@ def _print_parsed(reader: AcEvoSharedMemoryReader, segment: str) -> None:
               f"{'L_n':>6}  {'M_n':>6}  {'R_n':>6}")
         for label, ts in (("FL", gr.tyre_lf), ("FR", gr.tyre_rf),
                           ("RL", gr.tyre_lr), ("RR", gr.tyre_rr)):
-            d = ts.data
-            print(f"  {label:5}  {d.tyre_temperature_left:6.2f}  "
-                  f"{d.tyre_temperature_center:6.2f}  {d.tyre_temperature_right:6.2f}  "
-                  f"{d.tyre_normalized_temperature_left:6.3f}  "
-                  f"{d.tyre_normalized_temperature_center:6.3f}  "
-                  f"{d.tyre_normalized_temperature_right:6.3f}")
+            print(f"  {label:5}  {ts.tyre_temperature_left:6.2f}  "
+                  f"{ts.tyre_temperature_center:6.2f}  {ts.tyre_temperature_right:6.2f}  "
+                  f"{ts.tyre_normalized_temperature_left:6.3f}  "
+                  f"{ts.tyre_normalized_temperature_center:6.3f}  "
+                  f"{ts.tyre_normalized_temperature_right:6.3f}")
     else:
         print(f"[{segment}] parsed view not implemented yet — use --bytes for a hex dump")
 
