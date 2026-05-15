@@ -76,15 +76,35 @@ class _SPageFilePhysics(ctypes.Structure):
 
     Notable semantic differences vs AC1, per the PDF spec:
       * ``tyreWear`` is **0.0 = new, 1.0 = fully worn** (opposite of
-        AC1's "0..100 % remaining"). Callers must invert.
+        AC1's "0..100 % remaining"). Callers must invert when populated.
       * ``steerAngle`` is a **normalised -1..+1 ratio** (negative = left),
         not the radian value AC1 publishes.
       * ``accG`` ordering is **[lateral X, longitudinal Y, vertical Z]**.
+        Gravity is subtracted from the vertical component, so accG[2]
+        reads ≈0 at rest and only swings under chassis pitch / kerb hits.
       * ``physics.tc`` / ``physics.abs`` are *intervention intensity*
         (0..1 live activity). The driver-set setting level lives in
         ``graphics.electronics.tc_level`` / ``abs_level``.
-      * ``suspensionTravel`` is compression in metres (non-negative).
-      * ``rideHeight`` is in metres (always — no per-car unit drift).
+
+    Conventions where the running build deviates from the PDF (verified
+    live — apply step / source compensates):
+      * ``tyreWear`` is documented but **dead-zero in current builds**.
+        Source latches on the first non-zero sample and hides the wear
+        bar until then.
+      * ``suspensionTravel`` — PDF says compression metres (non-negative),
+        but some cars publish signed displacement around a static
+        reference. Source takes ``abs()``.
+      * ``rideHeight`` — PDF says metres, but some cars publish mm
+        directly in the same slot. Source auto-detects via
+        ``|raw| >= 1.0 ⇒ already mm``.
+
+    Graphics-block convention not stated in the PDF (verified live —
+    documented here for the next reader):
+      * ``SMEvoTyreState.tyre_temperature_left/right`` are car-relative
+        face labels ("left" = the side of the patch facing the car's
+        left), so they only line up with inner/outer for the right-side
+        wheels. Left-side wheels need the L↔R values swapped before
+        landing on the inner/outer slots.
     """
 
     _pack_ = 4
@@ -108,12 +128,14 @@ class _SPageFilePhysics(ctypes.Structure):
         ("tyreDirtyLevel", c_float * 4),
         ("tyreCoreTemperature", c_float * 4),
         # camberRAD has a per-wheel local sign convention: the setup-tool
-        # "negative = top-in" convention only matches the shared-memory
-        # sign for left-side wheels. Right-side wheels report the
-        # opposite sign — a setup of -2.5 degrees on FR/RR comes through
-        # as +0.044 / +0.035 rad. Magnitude always matches the setup
-        # tool. Negate FR/RR if you need a uniform "negative = top-in"
-        # semantic.
+        # "negative = top-in" convention only matches the SHM sign for
+        # left-side wheels. Right-side wheels report the opposite sign
+        # — verified live, e.g. setup -4° front / -3.5° rear lands as
+        # FL -3.955° / FR +4.038° / RL -3.502° / RR +3.496°. Magnitudes
+        # match the setup tool; only the sign on FR/RR flips. Negate
+        # FR/RR if you need a uniform "negative = top-in" semantic —
+        # that's all wheel_view does and it suffices for the contact-
+        # patch colour bands.
         ("camberRAD", c_float * 4),
         ("suspensionTravel", c_float * 4),
         ("drs", c_float),
@@ -684,6 +706,13 @@ class AcEvoTelemetrySource(TelemetrySource):
         # curve the synthetic source uses so the icon reads correctly
         # whenever the live norm is unavailable.
         self._brake_curve = Curve(DEFAULT_BRAKE_TEMP_CURVE)
+        # PDF documents ``physics.tyreWear`` but current AC EVO builds
+        # still leave the slot dead at 0.0 all session (verified live).
+        # Latch True the first time any corner publishes a non-zero so
+        # we surface the bar automatically when a future build wires it
+        # up — without keeping it permanently at "100 % remaining" today.
+        # Tyre wear is monotonic, so a one-way latch is safe.
+        self._tire_wear_live = False
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -796,6 +825,8 @@ class AcEvoTelemetrySource(TelemetrySource):
         i.steering = max(-1.0, min(1.0, float(ph.steerAngle)))
         i.ffb = max(0.0, min(1.0, abs(float(ph.finalFF))))
         # Per PDF, accG layout is [lateral X, longitudinal Y, vertical Z].
+        # AC Evo subtracts gravity from accG[2], so vertical reads ≈0 at
+        # rest and only swings under chassis pitch / kerb hits.
         i.g_lat = float(ph.accG[0])
         i.g_long = float(ph.accG[1])
         i.g_vert = float(ph.accG[2])
@@ -804,6 +835,11 @@ class AcEvoTelemetrySource(TelemetrySource):
 
         braking = ph.brake > 0.0
         abs_modulating = ph.absInAction != 0
+        # Latch the tyre-wear-is-live flag once any corner publishes a
+        # non-zero. Current builds leave tyreWear dead; this surfaces
+        # the bar automatically when a future build starts populating it.
+        if not self._tire_wear_live and any(ph.tyreWear[k] > 0.0 for k in range(4)):
+            self._tire_wear_live = True
 
         for wid in WHEEL_IDS:
             idx = _WHEEL_INDEX[wid]
@@ -816,10 +852,16 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.abs_active = abs_modulating and braking and not w.lock and slip > 0.10
 
             w.camber = float(ph.camberRAD[idx])
-            # Per PDF, suspensionTravel is compression in metres
-            # (non-negative). Defensive clamp at 0 in case the game
-            # writes a transient negative during a reset / spawn.
-            w.susp_t = max(0.0, float(ph.suspensionTravel[idx]))
+            # PDF says suspensionTravel is "compression in metres" (i.e.
+            # non-negative from full extension). Most cars conform, but
+            # some chassis (cars with active / electronically managed
+            # suspension are a known case) publish a signed displacement
+            # around a static reference instead — verified live: values
+            # cluster around −0.03 at rest and swing a couple of cm on
+            # kerbs. Take the magnitude so both conventions calibrate
+            # and render identically with the rolling-max heuristic
+            # below.
+            w.susp_t = abs(float(ph.suspensionTravel[idx]))
             # AC Evo no longer publishes the per-car suspensionMaxTravel,
             # so we calibrate susp_m_t from observation. Cars span a wide
             # range (~0.04 m on a GT3 to >0.15 m on a road car), so the
@@ -832,10 +874,13 @@ class AcEvoTelemetrySource(TelemetrySource):
                 w.susp_m_t = w.susp_t * 2.0
 
             # Ride height per axle (rideHeight[0]=front, [1]=rear).
-            # Per PDF, value is always in metres; WheelData.height is in
-            # mm so convert once.
+            # PDF documents this as metres, but some chassis publish mm
+            # directly in the same slot — verified live. No physical car
+            # has ≥ 1 m of ride height, so |raw| >= 1.0 is a clean "this
+            # is already mm" tell. WheelData.height is mm regardless.
             axle = idx // 2
-            w.height = float(ph.rideHeight[axle]) * 1000.0
+            raw = float(ph.rideHeight[axle])
+            w.height = raw if abs(raw) >= 1.0 else raw * 1000.0
 
             w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
             w.tire_l = float(ph.wheelLoad[idx])  # Newtons
@@ -850,8 +895,13 @@ class AcEvoTelemetrySource(TelemetrySource):
             w.disc_w = float(ph.discLife[idx])
             # ph.tyreWear semantic per official docs: 0.0 = new, 1.0 =
             # fully worn. WheelData.tire_w uses the opposite convention
-            # (1.0 = new) — invert.
-            w.tire_w = max(0.0, 1.0 - float(ph.tyreWear[idx]))
+            # (1.0 = new) — invert. Current builds leave the slot dead
+            # at 0.0, so we hide the bar until the latch flips.
+            if self._tire_wear_live:
+                w.tire_w = max(0.0, 1.0 - float(ph.tyreWear[idx]))
+                w.has_tire_wear = True
+            else:
+                w.has_tire_wear = False
 
     def _apply_graphics(self, gr: _SPageFileGraphic) -> None:
         """Pull HUD/graphics fields that complement (and in places replace)
@@ -929,9 +979,11 @@ class AcEvoTelemetrySource(TelemetrySource):
         #   * tyre_normalized_pressure / temperature_* — ratios against the
         #     compound's ideal (1.0 = on target). Lets colour bands track
         #     per-compound targets instead of hard-coded reference points.
-        # Per PDF: tyre_temperature_left is the inner-edge temperature,
-        # tyre_temperature_right is the outer-edge temperature. Same
-        # mapping for all four corners (no per-wheel mirroring).
+        # PDF documents tyre_temperature_left = inner, _right = outer,
+        # but verified live the field name is car-relative ("left" = the
+        # side of the patch facing the car's left). That happens to land
+        # on inner for FR/RR but on outer for FL/RL — so left wheels
+        # need the L↔R values swapped to land on the inner/outer slots.
         for wid, ts in (("FL", gr.tyre_lf), ("FR", gr.tyre_rf),
                         ("RL", gr.tyre_lr), ("RR", gr.tyre_rr)):
             w = self._frame.wheels[wid]
@@ -944,14 +996,23 @@ class AcEvoTelemetrySource(TelemetrySource):
                 w.tire_t_norm_m = float(ts.tyre_normalized_temperature_center)
             if ts.tyre_temperature_center > 0.0:
                 w.tire_t_m = float(ts.tyre_temperature_center)
-            if ts.tyre_normalized_temperature_left > 0.0:
-                w.tire_t_norm_i = float(ts.tyre_normalized_temperature_left)
-            if ts.tyre_normalized_temperature_right > 0.0:
-                w.tire_t_norm_o = float(ts.tyre_normalized_temperature_right)
-            if ts.tyre_temperature_left > 0.0:
-                w.tire_t_i = float(ts.tyre_temperature_left)
-            if ts.tyre_temperature_right > 0.0:
-                w.tire_t_o = float(ts.tyre_temperature_right)
+            is_left = wid[1] == "L"
+            inner_norm = (ts.tyre_normalized_temperature_right if is_left
+                          else ts.tyre_normalized_temperature_left)
+            outer_norm = (ts.tyre_normalized_temperature_left if is_left
+                          else ts.tyre_normalized_temperature_right)
+            inner_temp = (ts.tyre_temperature_right if is_left
+                          else ts.tyre_temperature_left)
+            outer_temp = (ts.tyre_temperature_left if is_left
+                          else ts.tyre_temperature_right)
+            if inner_norm > 0.0:
+                w.tire_t_norm_i = float(inner_norm)
+            if outer_norm > 0.0:
+                w.tire_t_norm_o = float(outer_norm)
+            if inner_temp > 0.0:
+                w.tire_t_i = float(inner_temp)
+            if outer_temp > 0.0:
+                w.tire_t_o = float(outer_temp)
             if ts.brake_normalized_temperature > 0.0:
                 w.brake_t_norm = float(ts.brake_normalized_temperature)
             else:
