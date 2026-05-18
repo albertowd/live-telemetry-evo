@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-05-18
+
+### Added
+- Polling and rendering decoupled across threads — telemetry source runs on a dedicated `QThread`; UI repaints at `QScreen.refreshRate()` Hz independently of poll cadence.
+- New `FrameBus` transports the latest snapshot (deep-copied, under lock) to the UI and a bounded queue to the CSV writer thread.
+- Tray submenu **Polling Hz** — 30 / 60 / 100 / 120 / 144 / 250; choice persisted via `settings.json`.
+- Tray actions **Start logging** / **Stop logging** + **Open logs folder**; CSV writes happen on a dedicated thread to keep the polling worker off disk.
+- CSV schema auto-built from `dataclasses.fields()` on `TelemetryFrame`; new dataclass fields appear in the next session's file with no maintenance step.
+- New `overlay.paths` module — config (`positions.json`) and logs (`logs/`) now always sit **next to the executable** in frozen builds (or in CWD during dev). `LIVE_TELEMETRY_DATA_DIR` env var overrides both.
+- Countdown screen now shows the **detected game name** above the digit, both centred at the detection-screen font size (the giant digit was visually jarring next to the detection text).
+- AC EVO: full set of doc-supplied KERS fields exposed — `has_kers`, `battery_temp_c`, `kers_lap_deploy_capped` / `_charge_capped`, `ers_overtake_mode`, `ers_heat_charging`, `ers_deployment_map`, `ers_recharge_map`. Chips for KMAX / CMAX / OT / HEAT; battery temp added to the readouts strip.
+- AC1: per-car ACD data plumbed through to widgets — torque curve drives the rev-bar colour band per car, per-compound thermal performance curve drives the per-wheel temperature widget, ideal pressure surfaced on `WheelData`.
+- `WheelData.susp_v` flag — true when `susp_m_t` came from rolling-max calibration (vs. a static engineered limit); suspension widget mid-band paints **blue** in that mode.
+
+### Changed
+- AC1 boost bar: dropped the `static.maxTurboBoost` seed (unreliable on many mods, per the sibling LiveTelemetry plugin). Pure rolling max from observed `turbo_boost` — bar right-edge tracks the highest boost actually achieved this session.
+- Engine widget rev-bar colour: uses the per-car torque curve from the ACD when available (AC1 with `data.acd`); otherwise self-calibrates from observed live `current_bhp` against the RPM the peak was seen at. The hardcoded 5500 RPM default curve no longer paints the F1 2004 (peak ~17000 RPM) bar red across most of its useful range.
+- Boost bar and KERS battery bar slots now render **fully transparent** when not applicable (NA car, ICE-only car) — no more black stripes at the top of the engine widget on cars that don't have a turbo or hybrid.
+- AC EVO ABS-active blink merges all three documented signals (`physics.absInAction` int, `physics.abs` intensity float, `graphics.abs_active` bool) — the per-wheel disk blink now fires on every car/build combo. Same for TC.
+- Per-wheel ABS active heuristic on AC EVO uses the documented `slipRatio` (not legacy `wheelSlip`); threshold dropped from 0.10 to 0.03 — ABS holds slip *below* ~10 % by design, so the previous threshold only fired after the wheel was already lost.
+- Brake disk now always rendered (was hidden on AC1 since `has_brake_temp=False`) — neutral white base for AC1 with blue ABS blink, temperature-curve tint for other games with white ABS blink so the cue contrasts against any temp colour.
+- AC1 + AC EVO: per-wheel **body-roll height correction** — the per-axle `rideHeight` is now split into per-wheel values using the relative suspension travel across the axle (more-compressed side reads lower). Matches the sibling LiveTelemetry plugin's correction.
+- Engine `max_turbo_boost` default flipped 1.2 → 0.0 so naturally aspirated cars on every source correctly hide the boost slot via the existing `> 0.05` visibility gate.
+- Default polling rate moved from a CLI-only `--hz` to a persisted setting changeable at runtime; `--hz 0` (new default) uses the persisted value.
+
+### Fixed
+- AC1 suspension calibration: removed the 5 % headroom inflation and 2× initial seed. With static `suspensionMaxTravel` trusted as-is, the "bottoming-out" red signal now fires correctly on stiff F1 suspension that legitimately brushes the limit under aero load. Same fix applied to ACC, AC Rally; AC EVO is always dynamic since the static block dropped the field.
+- AC1 tire-wear bar: the raw `tyreWear` signal is a grip/health value (climbs through warm-up, then drifts down across only ~0.06 normalised units of useful range), not a linear 0-100 % counter. Remap the 0.06 window below the fresh peak (pinned at 1.0 so a mid-session start doesn't misread the current value as fresh) onto 0..1 — the bar now actually moves across a stint instead of pegging at ~99 %.
+- KERS deploy-power derivation on AC EVO now gates on the explicit `physics.ersIsCharging` flag instead of inferring direction from a SoC drop — fires correctly even when SoC is pinned at 0 or 1, and no longer fragile under single-precision quantisation jitter.
+- `WheelData.has_brake_temp=False` on AC1 no longer hides the entire brake column; the icon stays so the ABS / lock blink remains visible, and the `°C` label is the only thing suppressed (matches the actual missing-signal — AC1's `brakeTemp` slot is never written by the game).
+- Dropped wasted writes to `brake_t` / `brake_t_norm` on AC1 (consumed only when `has_brake_temp=True`).
+- Sibling project fix: identified a source-mixing bug in `lt_wheel_info.py` where the body-roll height correction read this wheel's travel from the Python API but the opposite wheel's travel from shared memory. The Python-API guard the surrounding code applied got bypassed for the diff — most visible on F1-style cars with tiny absolute travel. Now consistent on both sides.
+
 ## [0.6.0] - 2026-05-11
 
 ### Added
@@ -59,6 +92,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
-[Unreleased]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.0...v0.6.5
 [0.6.0]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/albertowd/live-telemetry-ac-evo/releases/tag/v0.5.0

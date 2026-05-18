@@ -417,8 +417,8 @@ list since the previous tag.
 # 1. Bump version in pyproject.toml.
 # 2. Add the new ## [X.Y.Z] section to CHANGELOG.md (Keep a Changelog format).
 # 3. Tag and push.
-git tag v0.6.0
-git push origin v0.6.0
+git tag v0.6.5
+git push origin v0.6.5
 ```
 
 The release page populates a couple of minutes later — no manual upload
