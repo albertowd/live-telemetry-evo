@@ -415,7 +415,7 @@ def run(argv: list[str] | None = None) -> int:
             f"engine={layout.engine.w}x{layout.engine.h} "
             f"wheel={layout.wheels['FL'].w}x{layout.wheels['FL'].h}"
         )
-        countdown.start()
+        countdown.start(name)
 
     window.show()
     # Default to click-through ON: a full-screen overlay must not steal mouse
