@@ -52,6 +52,18 @@ class EngineView(DraggableWidget):
         super().__init__(parent)
         self._data = EngineData()
         self._power = Power.from_torque_curve(DEFAULT_TORQUE_CURVE)
+        # Reference identity of the torque curve last used to rebuild
+        # ``self._power``. When the source publishes a new list (per-car
+        # ACD load) we detect the change via ``is not`` and rebuild —
+        # cheap, no per-frame parsing.
+        self._loaded_torque_curve: list[tuple[float, float]] | None = None
+        # Fallback when the source can't supply a per-car curve (AC EVO,
+        # ACC, AC Rally — they publish live ``current_bhp`` but not the
+        # underlying curve). Tracks the peak BHP observed and the RPM at
+        # which it was seen, so we can colour "climbing toward peak"
+        # differently from "past peak" without needing the full curve.
+        self._observed_peak_hp = 0.0
+        self._observed_peak_rpm = 0.0
         # Battery-bar auto-detect state. AC1 reports ``kers_charge = 1.0``
         # on plenty of pure-ICE cars (and AC Evo doesn't publish
         # ``kers_max_j`` at all), so we can't gate on either field alone.
@@ -87,13 +99,49 @@ class EngineView(DraggableWidget):
             ratio = min(1.0, d.rpm_percent)
         else:
             ratio = min(1.0, d.rpm / d.max_rpm) if d.max_rpm > 0.0 else 0.0
+        # Rebuild the colour Power curve when the source publishes a new
+        # per-car torque curve (AC1 loads engine.ini's POWER_CURVE .lut
+        # via the ACD). List identity change = new car loaded; ``is not``
+        # is the right comparison since sources assign a fresh list.
+        if (d.torque_curve_nm
+                and d.torque_curve_nm is not self._loaded_torque_curve):
+            self._power = Power.from_torque_curve(d.torque_curve_nm)
+            self._loaded_torque_curve = d.torque_curve_nm
+            # Discard the observed-peak fallback state when we have a
+            # real curve — its peak RPM was learned against the wrong
+            # default and would now mis-steer the colour bands.
+            self._observed_peak_hp = 0.0
+            self._observed_peak_rpm = 0.0
+
+        # Update the observed power peak (used as a fallback when the
+        # source can't supply a per-car curve, e.g. AC EVO / ACC).
+        if (not self._loaded_torque_curve
+                and d.current_bhp > self._observed_peak_hp):
+            self._observed_peak_hp = d.current_bhp
+            self._observed_peak_rpm = d.rpm
+
         # Game-driven shift hints override the power-curve colour: red on
         # the upshift cue (full bar acts as a shift light), blue on the
-        # downshift cue. Falls back to the power-curve colour otherwise.
+        # downshift cue. Otherwise pick the best signal we have:
+        #   * per-car Power curve (AC1 with ACD) — exact peak HP / RPM.
+        #   * observed-peak fallback (AC EVO / ACC / AC Rally) — converges
+        #     once the driver has wound the engine out once.
         if d.shift_up_hint:
             color = Colors.red
         elif d.shift_down_hint:
             color = Colors.blue
+        elif self._loaded_torque_curve:
+            color = self._power.interpolate_color(d.rpm)
+        elif self._observed_peak_hp > 50.0 and d.current_bhp > 0.0:
+            perc = d.current_bhp / self._observed_peak_hp
+            if perc >= 0.995:
+                color = Colors.green
+            elif d.rpm > self._observed_peak_rpm:
+                color = Colors.red
+            elif perc >= 0.985:
+                color = Colors.blue
+            else:
+                color = Colors.white
         else:
             color = self._power.interpolate_color(d.rpm)
         rpm_fill = QRectF(RPM_BAR_RECT)

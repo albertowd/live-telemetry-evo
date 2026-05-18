@@ -48,8 +48,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer
 
-from ..interpolation import (Curve, DEFAULT_BRAKE_TEMP_CURVE,
-                              DEFAULT_TIRE_TEMP_CURVE)
+from ..interpolation import Curve, DEFAULT_TIRE_TEMP_CURVE
 from ..telemetry import TelemetryFrame, WHEEL_IDS
 from ._win32_mapping import NamedMapping
 from .ac1_acd import ACD
@@ -296,10 +295,12 @@ class AcTelemetrySource(TelemetrySource):
         super().__init__(parent)
         self._reader = AcSharedMemoryReader()
         self._frame = TelemetryFrame()
-        # Default curves for the *_norm fields AC1 doesn't publish — used
-        # until we successfully load per-compound curves from the ACD.
+        # Default tire-temp curve for tire_t_norm_* until we load the
+        # real per-compound curve from the ACD. Brake temp isn't kept
+        # here — AC1 never publishes a real brake-disc temperature so
+        # the source flips has_brake_temp=False and the widget renders
+        # the brake icon on a neutral base with no temp tint.
         self._default_tire_curve = Curve(DEFAULT_TIRE_TEMP_CURVE)
-        self._brake_curve = Curve(DEFAULT_BRAKE_TEMP_CURVE)
         # ACD-derived per-car/per-wheel-axle data. ``_acd`` is set on
         # connect; ``_torque_lut`` is the raw rpm->Nm table the .lut
         # ships and powers both current_bhp and current_torque. Per-wheel
@@ -429,12 +430,22 @@ class AcTelemetrySource(TelemetrySource):
         interpolate per-frame. The same LUT feeds both current_torque
         (Nm direct) and current_bhp (Nm × rpm / 5252)."""
         self._torque_lut = None
+        # Reset the per-frame curve reference too — assigning a new list
+        # below signals the widget to rebuild its colour Power curve. On
+        # cars with no ACD (mods missing data, missing AC install) the
+        # widget keeps its previous curve or falls back to defaults.
+        self._frame.engine.torque_curve_nm = []
         if self._acd is None:
             return
         torque_pts = self._acd.get_power_curve()
         if not torque_pts:
             return
         self._torque_lut = Curve(torque_pts)
+        # Hand the raw torque curve to the engine widget so it can build
+        # the colour band against the real per-car peak HP RPM instead
+        # of the default 5500 RPM curve baked into engine_view. List
+        # identity change is the widget's "new car" signal.
+        self._frame.engine.torque_curve_nm = list(torque_pts)
 
     def _refresh_compound_curves(self, compound: str) -> None:
         """Reload per-axle thermal-performance + ideal-pressure data when
@@ -446,15 +457,28 @@ class AcTelemetrySource(TelemetrySource):
         self._loaded_compound = compound
         self._tire_curves = {}
         self._ideal_pressure_psi = {}
+        # Reset per-wheel frame state so the widget rebuilds its curves
+        # when the compound changes mid-stint. Assigning fresh lists is
+        # the widget's "new compound loaded" signal.
+        for wid in WHEEL_IDS:
+            w = self._frame.wheels[wid]
+            w.temp_curve_pts = []
+            w.ideal_pressure_psi = 0.0
         if self._acd is None or not compound:
             return
         for wid in WHEEL_IDS:
+            w = self._frame.wheels[wid]
             temp_pts = self._acd.get_temp_curve(compound, wid)
             if temp_pts:
                 self._tire_curves[wid] = Curve(temp_pts)
+                # Hand the raw curve to the wheel widget so its TireTemp
+                # picks the cold-vs-hot side off the real compound peak
+                # instead of the default 90 °C reference.
+                w.temp_curve_pts = list(temp_pts)
             ideal = self._acd.get_ideal_pressure(compound, wid)
             if ideal is not None and ideal > 0.0:
                 self._ideal_pressure_psi[wid] = ideal
+                w.ideal_pressure_psi = float(ideal)
 
     def _update_kers_deploy(self, e) -> None:
         """Derive ``kers_deploy_kw`` from the change in throughput counter
@@ -622,12 +646,13 @@ class AcTelemetrySource(TelemetrySource):
         w.tire_t_norm_m = tire_curve.interpolate(w.tire_t_m)
         w.tire_t_norm_o = tire_curve.interpolate(w.tire_t_o)
 
-        # AC1's brakeTemp slot is never written by the game — it sits
-        # at the initial ambient (~12 °C) all session. Mark the signal
-        # unavailable so the widget hides the temperature label and
-        # the icon entirely instead of misleading.
-        w.brake_t = float(ph.brakeTemp[idx])
-        w.brake_t_norm = self._brake_curve.interpolate(w.brake_t)
+        # AC1's brakeTemp slot is documented in the SDK but the game
+        # never actually writes to it — it sits at the initial ambient
+        # (~12 °C) all session. Flip the capability flag off so the
+        # wheel widget paints the brake icon on a neutral white base
+        # (no temperature tint) and skips the °C label, but still
+        # surfaces the ABS / lock blink. Skip writing brake_t /
+        # brake_t_norm — they're only read when has_brake_temp is True.
         w.has_brake_temp = False
 
         # AC1's tyreWear is % remaining (100 fresh, 0 bald). Convert

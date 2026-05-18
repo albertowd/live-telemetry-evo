@@ -121,6 +121,13 @@ class WheelView(DraggableWidget):
         self._psi = TirePsi()
         self._temp = TireTemp(DEFAULT_TIRE_TEMP_CURVE)
         self._brake_temp = TireTemp(DEFAULT_BRAKE_TEMP_CURVE)
+        # Reference identity of the per-compound temp curve last used to
+        # build ``self._temp``. Sources that can supply a real curve
+        # (AC1 via the ACD's THERMAL_<section>.PERFORMANCE_CURVE) assign
+        # a fresh list on each compound change; we detect that via
+        # ``is not`` and rebuild so the cold-vs-hot side decision is
+        # picked off the right peak temp instead of the default 90 °C.
+        self._loaded_temp_curve: list[tuple[float, float]] | None = None
         self._height_warn_until = 0.0
         self._lock_warn_until = 0.0
         self._lock_blink_t = 0.0
@@ -141,6 +148,13 @@ class WheelView(DraggableWidget):
 
     def set_data(self, data: WheelData) -> None:
         self._data = data
+        # Rebuild the per-compound TireTemp when the source publishes a
+        # new curve (AC1 on car/compound change). ``is not`` is the right
+        # comparison since sources assign a fresh list per change.
+        if (data.temp_curve_pts
+                and data.temp_curve_pts is not self._loaded_temp_curve):
+            self._temp = TireTemp(data.temp_curve_pts)
+            self._loaded_temp_curve = data.temp_curve_pts
         self.update()
 
     def _x_left(self, x: float, w: float) -> float:
