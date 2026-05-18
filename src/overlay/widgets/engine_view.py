@@ -15,14 +15,16 @@ from .draggable import DraggableWidget
 # Original AC plugin sizes — we paint in this logical coord system and let
 # the widget's actual size scale via QPainter transforms.
 LOGICAL_W = 512.0
-# Bumped from 120 to fit the Phase 2 readouts row at the bottom — keep
-# in sync with ``ENGINE_LOGICAL_H`` in ``layout.py``.
-LOGICAL_H = 148.0
-BOOST_BAR_RECT = QRectF(0.0, 0.0, LOGICAL_W, 24.0)
-RPM_BAR_RECT = QRectF(0.0, 26.0, LOGICAL_W, 50.0)
-LABEL_RECT = QRectF(0.0, 77.0, LOGICAL_W, 22.0)
-AIDS_RECT = QRectF(0.0, 100.0, LOGICAL_W, 20.0)
-READOUTS_RECT = QRectF(0.0, 122.0, LOGICAL_W, 24.0)
+# Bumped from 148 to add a 26-px row at the top for the hybrid battery
+# bar (auto-hidden on pure ICE cars, but always part of the rectangle).
+# Keep in sync with ``ENGINE_LOGICAL_H`` in ``layout.py``.
+LOGICAL_H = 174.0
+BATTERY_BAR_RECT = QRectF(0.0, 0.0, LOGICAL_W, 24.0)
+BOOST_BAR_RECT = QRectF(0.0, 26.0, LOGICAL_W, 24.0)
+RPM_BAR_RECT = QRectF(0.0, 52.0, LOGICAL_W, 50.0)
+LABEL_RECT = QRectF(0.0, 103.0, LOGICAL_W, 22.0)
+AIDS_RECT = QRectF(0.0, 126.0, LOGICAL_W, 20.0)
+READOUTS_RECT = QRectF(0.0, 148.0, LOGICAL_W, 24.0)
 
 # Chip strip cell width. Conservative so up to eight Phase 1 chips fit
 # inside ``LOGICAL_W`` simultaneously (8 × 64 = 512); typical play only
@@ -50,6 +52,14 @@ class EngineView(DraggableWidget):
         super().__init__(parent)
         self._data = EngineData()
         self._power = Power.from_torque_curve(DEFAULT_TORQUE_CURVE)
+        # Battery-bar auto-detect state. AC1 reports ``kers_charge = 1.0``
+        # on plenty of pure-ICE cars (and AC Evo doesn't publish
+        # ``kers_max_j`` at all), so we can't gate on either field alone.
+        # Latch visible after seeing any of: capacity > 0, charge moved
+        # from its first-frame value, or the throughput counter ticked.
+        # ICE cars hit none of these and the bar stays hidden.
+        self._kers_visible = False
+        self._kers_spawn_charge: float | None = None
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def set_data(self, data: EngineData) -> None:
@@ -109,6 +119,8 @@ class EngineView(DraggableWidget):
         self._draw_aids(p, d)
         self._draw_readouts(p, d)
 
+        self._draw_battery(p, d)
+
         # Boost bar (only meaningful when the car has a turbo).
         p.fillRect(BOOST_BAR_RECT, Colors.black)
         if d.max_turbo_boost > 0.05:
@@ -138,6 +150,70 @@ class EngineView(DraggableWidget):
             p.restore()
 
         p.end()
+
+    def _draw_battery(self, p: QPainter, d: EngineData) -> None:
+        """KERS / hybrid battery bar — same two-pass text-clipping as the
+        boost bar.
+
+        Always paints a black background in the slot so the widget's
+        rectangle is consistent across cars; only the coloured fill + the
+        text appear once the auto-detect latches on. ICE cars stay at the
+        black slot for the whole session.
+        """
+        p.fillRect(BATTERY_BAR_RECT, Colors.black)
+
+        # Detection. Capacity > 0 is the strongest signal; if missing,
+        # any movement off the first-frame charge value or any tick of
+        # the throughput counter is enough.
+        if not self._kers_visible:
+            if d.kers_max_j > 0.0 or d.kers_current_kj > 0.0:
+                self._kers_visible = True
+            elif self._kers_spawn_charge is None:
+                self._kers_spawn_charge = d.kers_charge
+            elif abs(d.kers_charge - self._kers_spawn_charge) > 1e-4:
+                self._kers_visible = True
+        if not self._kers_visible:
+            return
+
+        ratio = max(0.0, min(1.0, d.kers_charge))
+        if ratio > 0.5:
+            color = Colors.green
+        elif ratio > 0.2:
+            color = Colors.yellow
+        else:
+            color = Colors.red
+        # Highlight deploy: while energy is actively leaving the battery,
+        # paint the fill blue so the cue is unambiguous regardless of SoC.
+        if d.kers_deploy_kw > 0.5:
+            color = Colors.blue
+
+        fill_w = BATTERY_BAR_RECT.width() * ratio
+        b_fill = QRectF(BATTERY_BAR_RECT.x(), BATTERY_BAR_RECT.y(),
+                        fill_w, BATTERY_BAR_RECT.height())
+        p.fillRect(b_fill, color)
+
+        if d.kers_max_j > 0.0:
+            max_kj = d.kers_max_j / 1000.0
+            cur_kj = ratio * max_kj
+            text = f"BAT {cur_kj:.0f} / {max_kj:.0f} kJ"
+        else:
+            text = f"BAT {ratio * 100.0:.0f}%"
+
+        p.setFont(label_font(14))
+        p.save()
+        p.setClipRect(b_fill)
+        p.setPen(Colors.black)
+        p.drawText(BATTERY_BAR_RECT, Qt.AlignCenter, text)
+        p.restore()
+
+        p.save()
+        p.setClipRect(QRectF(BATTERY_BAR_RECT.x() + fill_w,
+                             BATTERY_BAR_RECT.y(),
+                             BATTERY_BAR_RECT.width() - fill_w,
+                             BATTERY_BAR_RECT.height()))
+        p.setPen(color)
+        p.drawText(BATTERY_BAR_RECT, Qt.AlignCenter, text)
+        p.restore()
 
     def _draw_aids(self, p: QPainter, d: EngineData) -> None:
         """Driver-aid status row.

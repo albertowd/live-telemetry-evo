@@ -120,6 +120,21 @@ class EngineData:
     battery_voltage: float = 0.0
     fuel_liters: float = 0.0
     brake_bias: float = 0.0        # 0..1, fraction toward the front axle
+    # KERS / hybrid battery state (zero on pure ICE cars). ``kers_max_j``
+    # is the battery capacity in joules (AC1 publishes it, AC Evo's
+    # static block dropped it — 0 = unknown, widget falls back to %).
+    # ``kers_current_kj`` is the game's monotonic throughput counter
+    # (ticks during both deploy and regen). ``kers_deploy_kw`` is the
+    # EMA-smoothed deploy power the source derives from the throughput
+    # counter while the SoC is dropping; 0 otherwise. Sources should
+    # leave the whole group at default on pure ICE cars so the engine
+    # widget can auto-detect hybrids by activity (charge moved /
+    # throughput ticked / max_j > 0).
+    kers_charge: float = 0.0       # 0..1 state of charge
+    kers_max_j: float = 0.0        # battery capacity in joules (0 = unknown)
+    kers_current_kj: float = 0.0   # cumulative throughput counter
+    kers_input: float = 0.0        # driver deploy request 0..1
+    kers_deploy_kw: float = 0.0    # smoothed deploy power, derived in source
 
 
 @dataclass

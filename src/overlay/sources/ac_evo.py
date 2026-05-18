@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import time
 from ctypes import (c_bool, c_byte, c_char, c_float, c_int8, c_int16, c_int32,
                     c_uint8, c_uint16, c_uint32, c_uint64)
 from typing import Optional
@@ -713,6 +714,13 @@ class AcEvoTelemetrySource(TelemetrySource):
         # up — without keeping it permanently at "100 % remaining" today.
         # Tyre wear is monotonic, so a one-way latch is safe.
         self._tire_wear_live = False
+        # State for hybrid-deploy-power derivation (see
+        # _update_kers_deploy). AC Evo publishes ``current_bhp`` from
+        # the game so the widget doesn't need this for HP, but the
+        # battery bar consumes it for the "deploying" colour cue.
+        self._prev_kers_charge: Optional[float] = None
+        self._prev_kers_current_kj: Optional[float] = None
+        self._last_kers_tick: Optional[float] = None
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -763,9 +771,12 @@ class AcEvoTelemetrySource(TelemetrySource):
             return
 
         # Graphics first so physics can read the per-wheel lock flag it
-        # sets (abs_active gates on `not w.lock`).
+        # sets (abs_active gates on `not w.lock`). Hybrid deploy power
+        # depends on both blocks (charge from graphics, throughput
+        # counter from physics) so it runs after both apply steps.
         self._apply_graphics(graphics)
         self._apply_physics(phys)
+        self._update_kers_deploy(self._frame.engine)
         self.frame.emit(self._frame)
 
     def _apply_static(self, st: _SPageFileStatic) -> None:
@@ -776,6 +787,29 @@ class AcEvoTelemetrySource(TelemetrySource):
         # physics, so there is nothing to apply here yet. Track name /
         # ambient temperature could feed future widgets.
         del st
+
+    def _update_kers_deploy(self, e) -> None:
+        """Derive ``kers_deploy_kw`` — see ac1.py for the long-form
+        explanation. AC Evo uses the same throughput-counter convention
+        (``physics.kersCurrentKJ``) and the same SoC drop as the
+        directional cue."""
+        now = time.monotonic()
+        if (self._last_kers_tick is None
+                or self._prev_kers_charge is None
+                or self._prev_kers_current_kj is None):
+            raw_kw = 0.0
+        else:
+            delta_t = now - self._last_kers_tick
+            if delta_t > 0.0 and e.kers_charge < self._prev_kers_charge:
+                raw_kw = max(0.0,
+                             (e.kers_current_kj - self._prev_kers_current_kj)
+                             / delta_t)
+            else:
+                raw_kw = 0.0
+        e.kers_deploy_kw = 0.7 * e.kers_deploy_kw + 0.3 * raw_kw
+        self._prev_kers_charge = e.kers_charge
+        self._prev_kers_current_kj = e.kers_current_kj
+        self._last_kers_tick = now
 
     def _apply_physics(self, ph: _SPageFilePhysics) -> None:
         e = self._frame.engine
@@ -811,6 +845,15 @@ class AcEvoTelemetrySource(TelemetrySource):
         # "deployed" so the chip's bright-vs-dim differentiation matches
         # what the driver is actually doing.
         e.drs_enabled = bool(ph.drsEnabled) or float(ph.drs) > 0.5
+
+        # Hybrid telemetry — raw physics fields here; kers_charge as a
+        # 0..1 fraction comes from graphics.kers_charge_perc in
+        # _apply_graphics (the physics ``kersCharge`` is also 0..1 but
+        # graphics has the value the game's own HUD uses). Static block
+        # doesn't carry kersMaxJ on AC Evo, so the widget falls back to
+        # the % readout for cars with a battery.
+        e.kers_current_kj = float(ph.kersCurrentKJ)
+        e.kers_input = float(ph.kersInput)
 
         # Phase 3 — driver inputs / dynamics / car state. Pedals come in
         # as 0..1 from physics; the graphics block also publishes _percent
@@ -939,6 +982,10 @@ class AcEvoTelemetrySource(TelemetrySource):
         # one is enough to light the ERS chip — different engine types
         # populate different fields.
         e.ers_charging = bool(gr.kers_is_charging) or bool(gr.battery_is_charging)
+        # SoC from the graphics block (0..1 fraction the game's own HUD
+        # uses). Static block has no kersMaxJ on AC Evo, so the widget
+        # auto-falls-back to a %-of-charge readout.
+        e.kers_charge = float(gr.kers_charge_perc)
         e.wrong_way = bool(gr.is_wrong_way)
         e.valid_lap = bool(gr.is_valid_lap)
         e.last_lap = bool(gr.is_last_lap)

@@ -42,6 +42,7 @@ from __future__ import annotations
 import ctypes
 import math
 import sys
+import time
 from ctypes import c_float, c_int32, c_wchar
 from typing import Optional
 
@@ -309,6 +310,13 @@ class AcTelemetrySource(TelemetrySource):
         self._tire_curves: dict[str, Curve] = {}
         self._ideal_pressure_psi: dict[str, float] = {}
         self._loaded_compound: str = ""
+        # State for the hybrid-deploy-power derivation (see
+        # _update_kers_deploy). The source watches kers_charge for a
+        # drop (true deploy) and reads the rate off kers_current_kj,
+        # then EMA-smooths against single-precision quantisation jitter.
+        self._prev_kers_charge: Optional[float] = None
+        self._prev_kers_current_kj: Optional[float] = None
+        self._last_kers_tick: Optional[float] = None
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -371,6 +379,12 @@ class AcTelemetrySource(TelemetrySource):
             e.max_torque = float(st.maxTorque)
         if st.maxTurboBoost > 0:
             e.max_turbo_boost = float(st.maxTurboBoost)
+        # AC1 publishes the battery capacity here (AC Evo's static block
+        # dropped this field). 0.0 means "no battery" *or* "mod author
+        # didn't fill it in" — the engine widget gracefully falls back
+        # to a %-of-charge readout in either case.
+        if st.kersMaxJ > 0:
+            e.kers_max_j = float(st.kersMaxJ)
 
         # Per-wheel suspension max travel from the static block — no
         # rolling-max needed (AC Evo had to do that because the field
@@ -442,6 +456,44 @@ class AcTelemetrySource(TelemetrySource):
             if ideal is not None and ideal > 0.0:
                 self._ideal_pressure_psi[wid] = ideal
 
+    def _update_kers_deploy(self, e) -> None:
+        """Derive ``kers_deploy_kw`` from the change in throughput counter
+        while SoC is dropping, EMA-smoothed against quantisation jitter.
+
+        AC1's ``kers_current_kj`` is a monotonic throughput counter that
+        ticks during both deploy and regen — a raw delta can't tell the
+        two apart. The directional signal is ``kers_charge`` falling:
+        when it does, energy is leaving the battery, so the delta-kJ /
+        delta-t over the same interval is the deploy rate in kW.
+
+        ``kers_input`` is deliberately *not* used as a deploy gate — on
+        some AC1 hybrid mods the button blocks regen rather than driving
+        deploy, so a "button held during regen" frame would otherwise
+        report false deploy power.
+
+        EMA at α=0.3 (~30 ms half-life at 60 Hz) cuts the ~16 % frame-to-
+        frame jitter that single-precision quantisation in ``kers_charge``
+        introduces, at the cost of a short tail when deploy stops.
+        """
+        now = time.monotonic()
+        if (self._last_kers_tick is None
+                or self._prev_kers_charge is None
+                or self._prev_kers_current_kj is None):
+            delta_t = 0.0
+            raw_kw = 0.0
+        else:
+            delta_t = now - self._last_kers_tick
+            if delta_t > 0.0 and e.kers_charge < self._prev_kers_charge:
+                raw_kw = max(0.0,
+                             (e.kers_current_kj - self._prev_kers_current_kj)
+                             / delta_t)
+            else:
+                raw_kw = 0.0
+        e.kers_deploy_kw = 0.7 * e.kers_deploy_kw + 0.3 * raw_kw
+        self._prev_kers_charge = e.kers_charge
+        self._prev_kers_current_kj = e.kers_current_kj
+        self._last_kers_tick = now
+
     def _apply_physics(self, ph: _SPageFilePhysics) -> None:
         e = self._frame.engine
         e.rpm = float(ph.rpms)
@@ -450,15 +502,27 @@ class AcTelemetrySource(TelemetrySource):
         e.gear = int(ph.gear)
         e.speed_kmh = float(ph.speedKmh)
 
+        # Hybrid state — wire raw signals first so the deploy-power
+        # derivation below sees the current frame's values. The widget
+        # consumes ``kers_max_j``, ``kers_charge``, ``kers_current_kj``,
+        # and ``kers_deploy_kw`` to draw the battery bar and HP boost.
+        e.kers_charge = float(ph.kersCharge)
+        e.kers_current_kj = float(ph.kersCurrentKJ)
+        e.kers_input = float(ph.kersInput)
+        self._update_kers_deploy(e)
+
         # Live BHP / torque from the ACD's torque LUT when available.
         # AC1's shared memory doesn't publish either — the engine widget
         # would otherwise sit on a synthetic curve fitted from the
         # static peaks. With the .lut we interpolate the real torque at
         # the current RPM and convert to HP via the canonical 5252.
+        # On hybrid cars, fold in the smoothed deploy power (kW → HP at
+        # 1 kW ≈ 1.341 HP) so the readout reflects the actual wheel
+        # power, not just the ICE contribution.
         if self._torque_lut is not None and e.rpm > 0.0:
             torque_nm = max(0.0, self._torque_lut.interpolate(e.rpm))
             e.current_torque = torque_nm
-            e.current_bhp = torque_nm * e.rpm / 5252.0
+            e.current_bhp = torque_nm * e.rpm / 5252.0 + e.kers_deploy_kw * 1.341
         e.tc_level = float(ph.tc)
         e.abs_level = float(ph.abs)
         e.pit_limiter = bool(ph.pitLimiterOn)

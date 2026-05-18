@@ -7,9 +7,11 @@ from dataclasses import dataclass
 ENGINE_LOGICAL_W = 512
 # Original AC plugin used 120 (boost bar + RPM bar + label + chip strip).
 # We add a 28-px row at the bottom for Phase 2 analog readouts (water /
-# oil temperatures, pressures, fuel, brake bias) — keep this in sync
-# with ``LOGICAL_H`` in ``widgets/engine_view.py``.
-ENGINE_LOGICAL_H = 148
+# oil temperatures, pressures, fuel, brake bias) plus a 26-px row at the
+# top for the hybrid-battery bar (hidden on pure ICE cars but always
+# part of the widget rectangle) — keep this in sync with ``LOGICAL_H``
+# in ``widgets/engine_view.py``.
+ENGINE_LOGICAL_H = 174
 WHEEL_LOGICAL_W = 512
 WHEEL_LOGICAL_H = 316
 # Phase 3 inputs widget — pedals + steering + FFB + G-meter + damage /
