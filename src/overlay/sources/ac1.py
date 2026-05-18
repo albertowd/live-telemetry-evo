@@ -653,7 +653,19 @@ class AcTelemetrySource(TelemetrySource):
 
         axle = idx // 2
         raw = float(ph.rideHeight[axle])
-        w.height = raw if abs(raw) >= 1.0 else raw * 1000.0
+        height_mm = raw if abs(raw) >= 1.0 else raw * 1000.0
+        # Body-roll correction — AC1 publishes rideHeight per AXLE
+        # (only 2 values for 4 wheels), so by default FL and FR show
+        # the same height. The relative suspension travel across the
+        # axle splits that single reading into per-wheel values: the
+        # more-compressed side shows lower than the axle midpoint, the
+        # other shows higher. Same convention as the LiveTelemetry
+        # plugin's lt_wheel_info.py. Read raw signed travel from SHM
+        # (not w.susp_t) so the diff has the right sign on every car.
+        opposite_idx = idx ^ 1  # FL↔FR (0↔1), RL↔RR (2↔3)
+        susp_diff = (float(ph.suspensionTravel[idx])
+                     - float(ph.suspensionTravel[opposite_idx]))
+        w.height = height_mm - (susp_diff / 2.0) * 1000.0
 
         w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
         w.tire_l = float(ph.wheelLoad[idx])

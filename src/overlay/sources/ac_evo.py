@@ -962,7 +962,17 @@ class AcEvoTelemetrySource(TelemetrySource):
             # is already mm" tell. WheelData.height is mm regardless.
             axle = idx // 2
             raw = float(ph.rideHeight[axle])
-            w.height = raw if abs(raw) >= 1.0 else raw * 1000.0
+            height_mm = raw if abs(raw) >= 1.0 else raw * 1000.0
+            # Body-roll correction — same logic as the AC1 source and
+            # the LiveTelemetry plugin. Splits the per-axle rideHeight
+            # into per-wheel values using the relative suspension
+            # travel across the axle. Raw signed travel (not w.susp_t)
+            # so the diff stays correct on active-suspension cars that
+            # publish signed displacement around a non-zero rest.
+            opposite_idx = idx ^ 1  # FL↔FR (0↔1), RL↔RR (2↔3)
+            susp_diff = (float(ph.suspensionTravel[idx])
+                         - float(ph.suspensionTravel[opposite_idx]))
+            w.height = height_mm - (susp_diff / 2.0) * 1000.0
 
             w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
             w.tire_l = float(ph.wheelLoad[idx])  # Newtons
