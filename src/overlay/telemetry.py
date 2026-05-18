@@ -18,6 +18,14 @@ class WheelData:
     lock: bool = False
     susp_t: float = 0.0       # current suspension travel (m)
     susp_m_t: float = 0.0     # max observed travel (m); 0 = uncalibrated
+    # True when ``susp_m_t`` came from a rolling-max calibration rather
+    # than a static-supplied limit (typically: mod cars or AC EVO, whose
+    # static block dropped the field). The suspension widget colours
+    # this case blue in the middle band so the user can see the bar is
+    # tracking observed peaks rather than the engineered limit — and so
+    # the brief "ratio==1.0" at calibration startup doesn't read as a
+    # false bottoming-out red.
+    susp_v: bool = False
     tire_d: float = 0.0       # dirt level 0..4
     tire_l: float = 0.0       # vertical load, Newtons
     tire_p: float = 26.0      # pressure psi

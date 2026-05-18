@@ -942,20 +942,18 @@ class AcEvoTelemetrySource(TelemetrySource):
             # suspension are a known case) publish a signed displacement
             # around a static reference instead — verified live: values
             # cluster around −0.03 at rest and swing a couple of cm on
-            # kerbs. Take the magnitude so both conventions calibrate
-            # and render identically with the rolling-max heuristic
-            # below.
+            # kerbs. ``abs()`` collapses both conventions to a magnitude
+            # so the rolling-max heuristic below calibrates either way.
             w.susp_t = abs(float(ph.suspensionTravel[idx]))
-            # AC Evo no longer publishes the per-car suspensionMaxTravel,
-            # so we calibrate susp_m_t from observation. Cars span a wide
-            # range (~0.04 m on a GT3 to >0.15 m on a road car), so the
-            # field starts at 0 (uncalibrated): the first non-zero sample
-            # seeds it with 100 % headroom, and subsequent harder
-            # compressions tighten with a 5 % headroom.
-            if w.susp_m_t > 0.0:
-                w.susp_m_t = max(w.susp_m_t, w.susp_t * 1.05)
-            elif w.susp_t > 0.0:
-                w.susp_m_t = w.susp_t * 2.0
+            # AC Evo no longer publishes the per-car suspensionMaxTravel
+            # in its static block, so we're always in dynamic mode —
+            # plain rolling max from observed travel, flag ``susp_v``
+            # so the widget paints the middle band blue (calibrating)
+            # rather than white. Same convention as the AC1 source's
+            # "no static available" branch; see ac1.py for rationale.
+            if w.susp_t > w.susp_m_t:
+                w.susp_m_t = w.susp_t
+            w.susp_v = True
 
             # Ride height per axle (rideHeight[0]=front, [1]=rear).
             # PDF documents this as metres, but some chassis publish mm

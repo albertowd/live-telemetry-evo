@@ -120,6 +120,10 @@ class AcRallyTelemetrySource(TelemetrySource):
         self._frame = TelemetryFrame()
         self._tire_curve = Curve(DEFAULT_TIRE_TEMP_CURVE)
         self._brake_curve = Curve(DEFAULT_BRAKE_TEMP_CURVE)
+        # Per-wheel static suspensionMaxTravel — see AC1 source for the
+        # rationale (trust the engineered limit when supplied; fall back
+        # to rolling max + susp_v flag otherwise).
+        self._static_susp_max: dict[str, float] = {}
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -189,12 +193,14 @@ class AcRallyTelemetrySource(TelemetrySource):
         if st.maxTurboBoost > 0:
             e.max_turbo_boost = float(st.maxTurboBoost)
 
+        self._static_susp_max.clear()
         for wid in WHEEL_IDS:
             idx = _WHEEL_INDEX[wid]
             w = self._frame.wheels[wid]
             sm = float(st.suspensionMaxTravel[idx])
             if sm > 0.0:
                 w.susp_m_t = sm
+                self._static_susp_max[wid] = sm
 
     def _apply_physics(self, ph: _SPageFilePhysics) -> None:
         e = self._frame.engine
@@ -257,11 +263,17 @@ class AcRallyTelemetrySource(TelemetrySource):
             w.has_ride_height = False
             w.has_camber = False
 
-            w.susp_t = abs(float(ph.suspensionTravel[idx]))
-            if w.susp_m_t <= 0.0 and w.susp_t > 0.0:
-                w.susp_m_t = w.susp_t * 2.0
-            elif w.susp_m_t > 0.0 and w.susp_t * 1.05 > w.susp_m_t:
-                w.susp_m_t = w.susp_t * 1.05
+            # Same convention as AC1: pass raw signed travel through,
+            # trust static when supplied (no 5 % headroom), plain
+            # rolling max + susp_v flag when static is missing.
+            w.susp_t = float(ph.suspensionTravel[idx])
+            if wid in self._static_susp_max:
+                w.susp_m_t = self._static_susp_max[wid]
+                w.susp_v = False
+            else:
+                if w.susp_t > w.susp_m_t:
+                    w.susp_m_t = w.susp_t
+                w.susp_v = True
 
             w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
             # AC Rally publishes wheelLoad correctly (unlike ACC) — leave

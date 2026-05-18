@@ -410,10 +410,19 @@ class WheelView(DraggableWidget):
         rect = QRectF(self._x_left(346.0, 64.0), TOP_MARGIN, 64.0, 256.0)
         travel = (d.susp_t / d.susp_m_t) if d.susp_m_t > 0.0 else 0.5
 
+        # Mid-band is **blue** when ``susp_v`` (dynamic-max calibration,
+        # e.g. mod cars with no static suspensionMaxTravel, or any AC
+        # EVO car since the static block dropped that field), **white**
+        # when we trust an engineered limit. The red/yellow extremes
+        # still apply either way — but in dynamic mode the user knows
+        # that "ratio==1.0 red" at session start is calibration, not a
+        # real bottoming-out signal.
         if travel > 0.95 or travel < 0.05:
             band = Colors.red
         elif travel > 0.90 or travel < 0.10:
             band = Colors.yellow
+        elif d.susp_v:
+            band = Colors.blue
         else:
             band = Colors.white
 

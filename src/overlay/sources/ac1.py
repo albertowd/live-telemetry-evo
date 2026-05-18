@@ -311,6 +311,12 @@ class AcTelemetrySource(TelemetrySource):
         self._tire_curves: dict[str, Curve] = {}
         self._ideal_pressure_psi: dict[str, float] = {}
         self._loaded_compound: str = ""
+        # Per-wheel static suspensionMaxTravel from the AC1 static
+        # block, when the car file supplied a non-zero value. Used in
+        # _apply_wheel_physics to decide between "trust the engineered
+        # limit" (static present) and "rolling-max calibration" (no
+        # static, ``susp_v=True`` for the widget).
+        self._static_susp_max: dict[str, float] = {}
         # State for the hybrid-deploy-power derivation (see
         # _update_kers_deploy). The source watches kers_charge for a
         # drop (true deploy) and reads the rate off kers_current_kj,
@@ -399,15 +405,22 @@ class AcTelemetrySource(TelemetrySource):
         if st.kersMaxJ > 0:
             e.kers_max_j = float(st.kersMaxJ)
 
-        # Per-wheel suspension max travel from the static block — no
-        # rolling-max needed (AC Evo had to do that because the field
-        # disappeared in the newer game).
+        # Per-wheel suspension max travel from the static block. When
+        # the car file supplies it, treat the value as authoritative —
+        # the engineered limit — and let the widget read ratio==1.0 as
+        # "bottoming out" (red). Stiff F1 suspension routinely brushes
+        # the limit under aero load, so the previous rolling-with-5%-
+        # headroom logic was suppressing legitimate bottoming signals.
+        # The sibling LiveTelemetry plugin made the same choice; see
+        # its lt_wheel_info.py.
+        self._static_susp_max.clear()
         for wid in WHEEL_IDS:
             idx = _WHEEL_INDEX[wid]
             w = self._frame.wheels[wid]
             sm = float(st.suspensionMaxTravel[idx])
             if sm > 0.0:
                 w.susp_m_t = sm
+                self._static_susp_max[wid] = sm
 
         # Try to load the on-disk ACD for this car — gives us the real
         # torque curve, per-compound thermal performance, and per-axle
@@ -613,16 +626,30 @@ class AcTelemetrySource(TelemetrySource):
                             and not w.lock and slip > _ABS_SLIP_THRESHOLD)
 
         w.camber = float(ph.camberRAD[idx])
-        w.susp_t = abs(float(ph.suspensionTravel[idx]))
-        # If static didn't supply a max (mods sometimes leave it 0),
-        # fall back to a rolling-max with 5 % headroom — same trick
-        # the AC Evo source uses. The outer guard ensures we never
-        # divide-or-multiply by a zero reading.
-        if w.susp_t > 0.0:
-            if w.susp_m_t <= 0.0:
-                w.susp_m_t = w.susp_t * 2.0
-            elif w.susp_m_t < w.susp_t * 1.05:
-                w.susp_m_t = w.susp_t * 1.05
+        # Pass the raw signed value through — matches LiveTelemetry's
+        # behaviour. Cars that publish positive-only compression are
+        # unaffected; cars that publish signed displacement (rare,
+        # mostly active suspension mods) keep their convention.
+        w.susp_t = float(ph.suspensionTravel[idx])
+        # Two modes, picked by whether the static block supplied a
+        # ``suspensionMaxTravel`` for this wheel:
+        #   * Static present — trust it as the engineered limit. Ratio
+        #     ``susp_t/susp_m_t == 1.0`` then correctly reads as
+        #     "bottoming out" (red). No headroom inflation: stiff
+        #     suspensions (F1) routinely brush the limit and the user
+        #     wants that signal.
+        #   * Static absent — fall back to a plain rolling max from
+        #     observed travel; flag ``susp_v`` so the widget colours
+        #     the middle band blue (calibrating) instead of white. No
+        #     2× seed: matches LiveTelemetry's logic exactly, the
+        #     blue tint conveys "this scale is still settling".
+        if wid in self._static_susp_max:
+            w.susp_m_t = self._static_susp_max[wid]
+            w.susp_v = False
+        else:
+            if w.susp_t > w.susp_m_t:
+                w.susp_m_t = w.susp_t
+            w.susp_v = True
 
         axle = idx // 2
         raw = float(ph.rideHeight[axle])
