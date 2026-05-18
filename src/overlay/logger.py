@@ -51,7 +51,7 @@ _FLUSH_EVERY_N_ROWS = 60
 
 def _logs_dir() -> Path:
     """Resolved by :mod:`overlay.paths` — next to the bundled ``.exe``
-    in release builds, under ``AppConfigLocation`` for dev runs."""
+    in release builds, in the current working directory during dev runs."""
     return _resolve_logs_dir()
 
 

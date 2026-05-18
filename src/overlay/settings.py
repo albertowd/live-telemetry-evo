@@ -1,10 +1,11 @@
 """Persist per-widget positions and runtime preferences across sessions.
 
 Stored as a single JSON file resolved via :mod:`overlay.paths` — next to
-the bundled ``.exe`` in release builds, under ``AppConfigLocation`` for
-dev runs. Schema is intentionally trivial — one entry per widget id with
-absolute screen-pixel coords, plus a handful of top-level scalars
-(``size_index``, ``polling_hz``):
+the bundled ``.exe`` in release builds, in the current working directory
+during dev runs (see ``overlay.paths`` for the full resolution policy).
+Schema is intentionally trivial — one entry per widget id with absolute
+screen-pixel coords, plus a handful of top-level scalars (``size_index``,
+``polling_hz``):
 
 .. code-block:: json
 
