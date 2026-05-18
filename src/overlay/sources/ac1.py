@@ -671,7 +671,11 @@ class AcTelemetrySource(TelemetrySource):
         opposite_idx = idx ^ 1  # FL↔FR (0↔1), RL↔RR (2↔3)
         susp_diff = (float(ph.suspensionTravel[idx])
                      - float(ph.suspensionTravel[opposite_idx]))
-        w.height = height_mm - (susp_diff / 2.0) * 1000.0
+        # Clamp at 0: heavy body roll on the inner wheel can push the
+        # correction below the published axle midpoint, but a negative
+        # ride height isn't physical (the chassis would be underground).
+        # Floor it so the widget never reads as a negative number.
+        w.height = max(0.0, height_mm - (susp_diff / 2.0) * 1000.0)
 
         w.tire_d = float(ph.tyreDirtyLevel[idx]) * 4.0
         w.tire_l = float(ph.wheelLoad[idx])
