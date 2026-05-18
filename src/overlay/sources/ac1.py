@@ -243,6 +243,12 @@ _LOCK_SLIP_THRESHOLD = 0.40
 # ABS-active heuristic: brake input + per-wheel slip above this small
 # threshold while not fully locked.
 _ABS_SLIP_THRESHOLD = 0.10
+# End-of-life delta below per-wheel peak ``tyreWear`` (in 0..1 normalised
+# units). AC1's tyreWear is a grip/health signal that spans roughly 6
+# raw points (0.06 normalised) from peak grip to "tyre is done", so we
+# stretch that window across the full wear bar. Empirical value from
+# the LiveTelemetry plugin.
+_AC1_TIRE_WEAR_WINDOW = 0.06
 
 
 class AcSharedMemoryReader:
@@ -706,10 +712,26 @@ class AcTelemetrySource(TelemetrySource):
         # brake_t_norm — they're only read when has_brake_temp is True.
         w.has_brake_temp = False
 
-        # AC1's tyreWear is % remaining (100 fresh, 0 bald). Convert
-        # to the overlay's "remaining grip" convention (1.0 fresh).
-        wear_pct = float(ph.tyreWear[idx])
-        w.tire_w = max(0.0, min(1.0, wear_pct / 100.0))
+        # AC1's tyreWear is NOT a linear "% remaining" — despite the
+        # nominal 0–100 scale, in practice it's a grip/health signal
+        # that climbs slightly during warm-up toward ~1.0 normalised,
+        # then drifts back down as the tyre wears. The useful range
+        # below peak grip is only ~0.06 normalised units before the
+        # tyre is effectively done. Treating the raw value as a linear
+        # ratio against 100 would peg the bar at ~99 % for the whole
+        # stint, which is why our previous bar barely moved.
+        #
+        # Remap the 0.06-unit window below the fresh-tyre peak (1.0)
+        # onto 0..1. We deliberately pin the peak at 1.0 instead of
+        # observing it per-wheel — observation would misread the first
+        # mid-session sample as "peak", so a tyre already half-worn
+        # when the overlay starts would render as fresh. The trade-off
+        # is that during warm-up the bar shows ~92 → 100 % rather than
+        # locked at 100 %, which is also a fair representation of the
+        # grip climb the raw signal models.
+        raw = max(0.0, min(1.0, float(ph.tyreWear[idx]) / 100.0))
+        floor = 1.0 - _AC1_TIRE_WEAR_WINDOW
+        w.tire_w = max(0.0, min(1.0, (raw - floor) / _AC1_TIRE_WEAR_WINDOW))
         # AC1's SDK predates padLife / discLife — the fields aren't in
         # the physics struct at all. Hide the brake-wear bars instead
         # of rendering stuck-fresh values that would mislead the user.
