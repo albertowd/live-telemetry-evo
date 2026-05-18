@@ -1,37 +1,32 @@
-"""Persist per-widget positions across sessions.
+"""Persist per-widget positions and runtime preferences across sessions.
 
-Stored as a single JSON file under the platform's user-config directory
-(``QStandardPaths.AppConfigLocation``); home-dir fallback if that's
-empty. Schema is intentionally trivial — one entry per widget id with
-absolute screen-pixel coords:
+Stored as a single JSON file resolved via :mod:`overlay.paths` — next to
+the bundled ``.exe`` in release builds, under ``AppConfigLocation`` for
+dev runs. Schema is intentionally trivial — one entry per widget id with
+absolute screen-pixel coords, plus a handful of top-level scalars
+(``size_index``, ``polling_hz``):
 
 .. code-block:: json
 
     {
       "engine": {"x": 700, "y": 16},
-      "FL":     {"x": 16,  "y": 200}
+      "FL":     {"x": 16,  "y": 200},
+      "size_index": 2,
+      "polling_hz": 60
     }
 
-The validator in :func:`load_positions` survives a corrupt or partial
-file by just dropping the bad entries.
+The validators below survive a corrupt or partial file by dropping the
+bad entries rather than failing the whole load.
 """
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths
-
-
-def _settings_dir() -> Path:
-    base = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
-    p = Path(base)
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+from .paths import settings_path
 
 
-def _positions_path() -> Path:
-    return _settings_dir() / "positions.json"
+def _positions_path():
+    return settings_path()
 
 
 def _read() -> dict:

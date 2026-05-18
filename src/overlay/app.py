@@ -225,9 +225,10 @@ def run(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     app = QApplication(sys.argv)
-    # Sets the per-user config directory QStandardPaths resolves for our
-    # positions.json — without this, Qt falls back to a generic "QtProject"
-    # path which is harder to find when the user wants to clear it.
+    # Config + logs live next to the executable (or in CWD during dev)
+    # — see ``overlay.paths``. These identifiers no longer affect file
+    # locations; they're kept so any QStandardPaths-aware Qt component
+    # (taskbar grouping, native dialogs) has a sensible app identity.
     app.setOrganizationName("LiveTelemetryEvo")
     app.setApplicationName("Overlay")
 

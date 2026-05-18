@@ -27,9 +27,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from PySide6.QtCore import QStandardPaths
-
 from .frame_bus import FrameBus
+from .paths import logs_dir as _resolve_logs_dir
 from .telemetry import EngineData, InputsData, TelemetryFrame, WHEEL_IDS, WheelData
 
 
@@ -51,11 +50,9 @@ _FLUSH_EVERY_N_ROWS = 60
 
 
 def _logs_dir() -> Path:
-    """``<AppConfigLocation>/logs`` — sibling of ``positions.json``."""
-    base = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
-    path = Path(base) / "logs"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """Resolved by :mod:`overlay.paths` — next to the bundled ``.exe``
+    in release builds, under ``AppConfigLocation`` for dev runs."""
+    return _resolve_logs_dir()
 
 
 def _flatten_dataclass(prefix: str,

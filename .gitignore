@@ -25,3 +25,8 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime artifacts (dev mode writes them next to pyproject.toml; the
+# frozen .exe writes them next to itself — see overlay.paths).
+positions.json
+logs/
