@@ -121,9 +121,11 @@ class EngineView(DraggableWidget):
 
         self._draw_battery(p, d)
 
-        # Boost bar (only meaningful when the car has a turbo).
-        p.fillRect(BOOST_BAR_RECT, Colors.black)
+        # Boost bar — only painted when the car has a turbo. Naturally
+        # aspirated cars leave the slot fully transparent so the widget
+        # doesn't show a black stripe with no signal behind it.
         if d.max_turbo_boost > 0.05:
+            p.fillRect(BOOST_BAR_RECT, Colors.black)
             b_ratio = max(0.0, d.turbo_boost / max(0.1, d.max_turbo_boost))
             b_color: QColor = Colors.white if b_ratio < 0.9 else Colors.green
             fill_w = BOOST_BAR_RECT.width() * b_ratio
@@ -155,13 +157,10 @@ class EngineView(DraggableWidget):
         """KERS / hybrid battery bar — same two-pass text-clipping as the
         boost bar.
 
-        Always paints a black background in the slot so the widget's
-        rectangle is consistent across cars; only the coloured fill + the
-        text appear once the auto-detect latches on. ICE cars stay at the
-        black slot for the whole session.
+        Only painted once the auto-detect latches on; ICE cars leave the
+        slot fully transparent so the widget doesn't show a black stripe
+        with no signal behind it.
         """
-        p.fillRect(BATTERY_BAR_RECT, Colors.black)
-
         # Detection. AC EVO publishes ``has_kers`` directly so the
         # source flips that True the moment we connect to a hybrid car —
         # the activity heuristics below cover AC1 / mods where the flag
@@ -177,6 +176,8 @@ class EngineView(DraggableWidget):
                 self._kers_visible = True
         if not self._kers_visible:
             return
+
+        p.fillRect(BATTERY_BAR_RECT, Colors.black)
 
         ratio = max(0.0, min(1.0, d.kers_charge))
         if ratio > 0.5:

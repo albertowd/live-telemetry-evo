@@ -81,7 +81,11 @@ class EngineData:
     max_power: float = 500.0   # HP
     max_rpm: float = 8500.0
     max_torque: float = 500.0  # Nm
-    max_turbo_boost: float = 1.2
+    # Default 0.0 = naturally aspirated. Sources that detect a turbo
+    # set this from the static block (AC1/ACC/AC Rally) or the graphics
+    # block (AC EVO); the engine widget's visibility gate (> 0.05)
+    # then keeps NA cars from showing an empty black boost slot.
+    max_turbo_boost: float = 0.0
     rpm: float = 0.0
     turbo_boost: float = 0.0
     # AC1/Evo gear convention: 0=R, 1=N, 2+ = forward gears (display as N-1).
