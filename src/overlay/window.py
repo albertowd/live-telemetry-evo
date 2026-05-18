@@ -30,6 +30,7 @@ _WM_HOTKEY = 0x0312
 _MOD_ALT = 0x0001
 _MOD_CONTROL = 0x0002
 _MOD_NOREPEAT = 0x4000
+_VK_C = 0x43
 _VK_L = 0x4C
 _VK_Q = 0x51
 _VK_R = 0x52
@@ -40,12 +41,14 @@ _HK_ID_TOGGLE = 1
 _HK_ID_QUIT = 2
 _HK_ID_RESET = 3
 _HK_ID_SIZE = 4
+_HK_ID_LOG = 5
 
 # Human-readable labels shown next to the matching tray-menu entries.
 HOTKEY_TOGGLE_LABEL = "Ctrl+Alt+L"
 HOTKEY_QUIT_LABEL = "Ctrl+Alt+Q"
 HOTKEY_RESET_LABEL = "Ctrl+Alt+R"
 HOTKEY_SIZE_LABEL = "Ctrl+Alt+S"
+HOTKEY_LOG_LABEL = "Ctrl+Alt+C"
 
 if sys.platform != "win32":
     raise OSError("Live Telemetry Evo is Windows-only")
@@ -163,6 +166,7 @@ class OverlayWindow(QWidget):
 
     reset_hotkey = Signal()
     size_hotkey = Signal()
+    log_hotkey = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -197,6 +201,7 @@ class OverlayWindow(QWidget):
         self._hotkey_filter.register(_HK_ID_QUIT, QApplication.quit)
         self._hotkey_filter.register(_HK_ID_RESET, self.reset_hotkey.emit)
         self._hotkey_filter.register(_HK_ID_SIZE, self.size_hotkey.emit)
+        self._hotkey_filter.register(_HK_ID_LOG, self.log_hotkey.emit)
         QApplication.instance().installNativeEventFilter(self._hotkey_filter)
 
         self.resize(640, 280)
@@ -226,10 +231,11 @@ class OverlayWindow(QWidget):
         ok_q = _RegisterHotKey(None, _HK_ID_QUIT, mods, _VK_Q)
         ok_r = _RegisterHotKey(None, _HK_ID_RESET, mods, _VK_R)
         ok_s = _RegisterHotKey(None, _HK_ID_SIZE, mods, _VK_S)
-        if not (ok_l and ok_q and ok_r and ok_s):
+        ok_c = _RegisterHotKey(None, _HK_ID_LOG, mods, _VK_C)
+        if not (ok_l and ok_q and ok_r and ok_s and ok_c):
             err = ctypes.get_last_error()
             print(f"[overlay] RegisterHotKey failed (err={err}); "
-                  f"Ctrl+Alt+L/Q/R/S may not work", file=sys.stderr)
+                  f"Ctrl+Alt+L/Q/R/S/C may not work", file=sys.stderr)
         self._hotkeys_registered = True
 
     def _unregister_hotkeys(self) -> None:
@@ -239,6 +245,7 @@ class OverlayWindow(QWidget):
         _UnregisterHotKey(None, _HK_ID_QUIT)
         _UnregisterHotKey(None, _HK_ID_RESET)
         _UnregisterHotKey(None, _HK_ID_SIZE)
+        _UnregisterHotKey(None, _HK_ID_LOG)
         self._hotkeys_registered = False
 
     def _reassert_topmost(self) -> None:

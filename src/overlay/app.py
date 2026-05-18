@@ -21,8 +21,8 @@ from .widgets.detection import DetectionView
 from .widgets.engine_view import EngineView
 from .widgets.inputs_view import InputsView
 from .widgets.wheel_view import WheelView
-from .window import (HOTKEY_QUIT_LABEL, HOTKEY_RESET_LABEL, HOTKEY_SIZE_LABEL,
-                     HOTKEY_TOGGLE_LABEL, OverlayWindow)
+from .window import (HOTKEY_LOG_LABEL, HOTKEY_QUIT_LABEL, HOTKEY_RESET_LABEL,
+                     HOTKEY_SIZE_LABEL, HOTKEY_TOGGLE_LABEL, OverlayWindow)
 
 
 # Polling rates exposed in the tray submenu. The source's QTimer runs at
@@ -324,6 +324,7 @@ def run(argv: list[str] | None = None) -> int:
     # Global hotkeys (registered in window.py via Win32 RegisterHotKey).
     window.reset_hotkey.connect(_do_reset)
     window.size_hotkey.connect(_cycle_size)
+    window.log_hotkey.connect(_toggle_logging)
 
     # System-tray icon: reset / click-through / size submenu /
     # polling Hz submenu / quit. Held by ``window`` so it lives as long
@@ -347,6 +348,7 @@ def run(argv: list[str] | None = None) -> int:
         click_through_shortcut=HOTKEY_TOGGLE_LABEL,
         size_shortcut=HOTKEY_SIZE_LABEL,
         quit_shortcut=HOTKEY_QUIT_LABEL,
+        logging_shortcut=HOTKEY_LOG_LABEL,
     )
 
     # Hide the telemetry widgets during the countdown — they reveal when

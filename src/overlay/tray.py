@@ -32,6 +32,7 @@ def make_tray(
     click_through_shortcut: str | None = None,
     size_shortcut: str | None = None,
     quit_shortcut: str | None = None,
+    logging_shortcut: str | None = None,
 # PySide6 exposes QAction.triggered / QMenu.aboutToShow /
 # QSystemTrayIcon.activated as bound Signal objects via runtime metaclass
 # magic that pylint can't introspect, so every .connect() in this module
@@ -109,7 +110,7 @@ def make_tray(
 
     # CSV logging — single toggle action whose text flips between
     # "Start logging" / "Stop logging" based on current state.
-    logging_action = QAction("Start logging", menu)
+    logging_action = QAction(_with_shortcut("Start logging", logging_shortcut), menu)
     logging_action.triggered.connect(lambda _checked: on_toggle_logging())
     menu.addAction(logging_action)
 
@@ -131,7 +132,12 @@ def make_tray(
         cur_hz = current_polling_hz()
         for hz, a in hz_actions:
             a.setChecked(hz == cur_hz)
-        logging_action.setText("Stop logging" if is_logging() else "Start logging")
+        logging_action.setText(
+            _with_shortcut(
+                "Stop logging" if is_logging() else "Start logging",
+                logging_shortcut,
+            )
+        )
 
     # Re-read state every time the menu opens so checkmarks stay in
     # lockstep with the floating buttons and the Ctrl+Alt+L hotkey.

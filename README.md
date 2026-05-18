@@ -36,7 +36,8 @@ and screenshots.
 1. Go to the releases page the download the latest version from [GitHub](https://github.com/albertowd/live-telemetry-evo/releases) or [Overtake.gg](https://www.overtake.gg/downloads/live-telemetry-evo.84121/).
 2. Double-click on it with the session already running so it auto detects which
    game to load the data from.
-3. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+Q` to quit.
+3. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+C` to start/stop
+   logging, `Ctrl+Alt+Q` to quit.
 
 ### Option B — run the prebuilt executable
 
@@ -46,7 +47,8 @@ and screenshots.
 3. Start any supported Assetto Corsa title. The overlay auto-detects which game
    is running and attaches as soon as it publishes shared memory; the
    *Detecting AC Environment...* screen stays up until then.
-4. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+Q` to quit.
+4. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+C` to start/stop
+   logging, `Ctrl+Alt+Q` to quit.
 
 ### Option A — run from source
 
@@ -70,8 +72,15 @@ python -m overlay --source acc         # force Assetto Corsa Competizione
 python -m overlay --source acrally     # force Assetto Corsa Rally
 python -m overlay --source ac1         # force original Assetto Corsa
 python -m overlay --source synthetic   # animated mock data, no game required
-python -m overlay --hz 120             # sample rate in Hz (default: 60)
+python -m overlay --hz 120             # one-shot override; 0 (default) uses the
+                                       # persisted tray choice (default 60)
 ```
+
+The polling rate is **persisted across sessions** (`30 / 60 / 100 / 120 / 144 /
+250` Hz) and is changeable at runtime from the **Polling Hz** tray submenu —
+the worker thread re-arms its timer without restarting. UI repaints
+independently at the display refresh rate (`QScreen.refreshRate()`), so faster
+polling never makes the widgets paint more often than your monitor can show.
 
 In `auto` mode the overlay shows a *Detecting AC Environment...* message and
 polls the Win32 shared-memory namespace (`acevo_pmf_*` vs `acpmf_*`) plus the
@@ -107,13 +116,13 @@ why these differences exist, see [`MEMORY.md`](MEMORY.md).
 | Camber tire rotation | live | live | upright | upright |
 | Contact-patch bars | live | live | hidden | hidden |
 | Tire load circle | live | live | hidden | live |
-| Suspension travel bar | live | live | live | live |
-| Ride-height icon | live | live | hidden | hidden |
-| Brake disc temperature | live | hidden | live | live (K→°C) |
+| Suspension travel bar | live (dynamic-max) | live (static or rolling) | live (static or rolling) | live (static or rolling) |
+| Ride-height icon | live (per-wheel) | live (per-wheel) | hidden | hidden |
+| Brake disc temperature | live | neutral (no temp) | live | live (K→°C) |
 | Per-wheel lock blink | game flag | slip heuristic | slip heuristic | slip heuristic |
-| ABS-modulating blink | game flag | slip heuristic | game flag | game flag |
+| ABS-modulating blink | merged signals | slip heuristic | game flag | game flag |
 | Brake pad / disc wear bars | live | — | live | live (unknown scale) |
-| Tire wear bar | hidden | live (%) | hidden | hidden |
+| Tire wear bar | hidden | live (self-calibrated) | hidden | hidden |
 | Tire dirt overlay | live | live | live | live |
 | Wheel ID + compound name | per-axle | uniform | uniform | uniform |
 
@@ -121,8 +130,10 @@ why these differences exist, see [`MEMORY.md`](MEMORY.md).
 synthesised from a built-in default curve · *core fallback* = missing
 signal replaced with core temperature · *static* = read once at session
 load · *partial* = only the fields that exist in that game's struct ·
-*slip heuristic* = inferred from `wheelSlip` threshold under braking ·
-*hidden* = widget element isn't drawn · *—* = unsupported on that game.
+*slip heuristic* = inferred from `slipRatio` / `wheelSlip` threshold under
+braking · *merged signals* = OR of all three published "ABS active"
+signals (physics int + physics intensity + graphics bool) · *hidden* =
+widget element isn't drawn · *—* = unsupported on that game.
 
 ### Game-specific notes
 
@@ -146,9 +157,15 @@ it as int32 to avoid the denormal trap that would peg the RPM bar at
 100 %). Source: bundled `ACCSharedMemoryDocumentationV1.8.12.pdf`.
 
 **AC1** doesn't expose live BHP, per-aid `*_in_action` flags, brake
-pad/disc life, normalised temps/pressure, or a per-wheel lock flag — the
-overlay falls back to the synthesised power curve, slip-threshold
-heuristics, and curve-interpolated norms.
+pad/disc life, brake disc temperature, normalised temps/pressure, or a
+per-wheel lock flag. To compensate, the source parses the car's
+`data.acd` on connect: real torque curve drives both the live HP
+readout and the rev-bar colour band per-car (the F1 2004 peak lands at
+its real ~17 000 RPM instead of a hardcoded 5 500 RPM), per-compound
+thermal performance curves drive `tire_t_norm_*`, and `PRESSURE_IDEAL`
+drives `tire_p_norm`. AC1's `tyreWear` is a **grip/health signal** (not
+a linear "% remaining"), so the wear bar self-calibrates to span the
+~0.06 useful range below the fresh-tyre peak.
 
 **AC Evo** has the most complete coverage; the field-by-field reference
 is in [`docs/SHARED_MEMORY.md`](docs/SHARED_MEMORY.md).
@@ -164,6 +181,7 @@ is in [`docs/SHARED_MEMORY.md`](docs/SHARED_MEMORY.md).
 | `Ctrl+Alt+L` | Toggle click-through (lock / unlock the overlay for repositioning). |
 | `Ctrl+Alt+R` | Reset every widget to its default position and visibility.          |
 | `Ctrl+Alt+S` | Cycle widget size: `XS → S → M → L → XL → XS …`. Persists.          |
+| `Ctrl+Alt+C` | Start / stop CSV logging of every telemetry frame.                  |
 | `Ctrl+Alt+Q` | Quit the overlay.                                                   |
 
 These use Win32 `RegisterHotKey`, so they fire even while the game has focus.
@@ -176,9 +194,29 @@ it to open a menu mirroring the hotkeys above:
 - **Reset positions** — restores the default layout.
 - **Click-through** — checkable; reflects current state.
 - **Size** — submenu with `XS / S / M / L / XL` as a radio group.
+- **Polling Hz** — submenu with `30 / 60 / 100 / 120 / 144 / 250` Hz as a
+  radio group; controls the shared-memory poll rate and the CSV row rate.
+- **Start logging / Stop logging** — toggles CSV capture of every
+  telemetry frame (raw + calculated) to `logs/<timestamp>_<source>.csv`.
+- **Open logs folder** — opens the directory holding the CSV files
+  alongside the executable.
 - **Quit** — exits the overlay.
 
-Each menu entry shows its hotkey alongside the label.
+Each menu entry that maps to a hotkey shows it alongside the label.
+
+### CSV logging
+
+While **Start logging** is active, every telemetry frame the worker
+publishes is written as one CSV row. The schema is auto-built from the
+`TelemetryFrame` dataclass — any new scalar field appears as a new
+column the next session — and rows are flushed every 60 writes so a
+hard kill loses at most ~1 s of data at 60 Hz. The writer thread is
+backpressure-bounded: if the disk stalls, the oldest queued row is
+dropped rather than blocking the polling worker (drop count is printed
+when logging stops).
+
+Files land in `<exe-dir>\logs\` for the bundled .exe or `<cwd>\logs\`
+during dev, named `YYYY-MM-DD_HHMMSS_<source>.csv`.
 
 ### Mouse — when the overlay is unlocked (click-through OFF)
 
@@ -194,9 +232,11 @@ whole layout back.
 
 - **Click-through is ON by default** so the overlay never steals mouse input from the
   game. Toggle it off (`Ctrl+Alt+L`) only when you want to drag widgets.
-- A 5-second countdown is drawn full-screen before the telemetry widgets reveal. The
-  source still feeds frames during the countdown so values are live the moment the
-  widgets appear.
+- A 5-second countdown is drawn full-screen before the telemetry widgets reveal,
+  showing the **detected game name** above the digit and reusing the
+  detection-screen font size so the two screens flow as one. The source still
+  feeds frames during the countdown so values are live the moment the widgets
+  appear.
 - Widgets you hid in a previous session stay hidden; `Ctrl+Alt+R` brings them back.
 
 ---
@@ -211,25 +251,30 @@ multiplies it by your size factor (XS = 0.5 … XL = 1.5).
 ### Engine bar (top-centred at the bottom of the screen)
 
 ```
-┌─────────────────────────── boost bar ───────────────────────────┐
-│                                                                 │
+┌──────────────────── KERS / battery bar ─────────────────────────┐  hybrid only
+├─────────────────────────── boost bar ───────────────────────────┤  turbo only
 ├─────────────────────────── RPM bar ─────────────────────────────┤
 │                                                                 │
 │   1234 HP                  3   148 km/h                7820 RPM │
-│         PIT  TC  ABS  ESC  LC  DRS  ERS  WW  INV  LAST          │
-│  WAT 92°  OIL 110°  OPR 4.5 bar  EXH 720°  FUEL 42L  BIAS 55%F  │
+│      PIT  TC  ABS  ESC  LC  DRS  ERS  OT  HEAT  KMAX  CMAX      │
+│  WAT 92°  OIL 110°  OPR 4.5 bar  EXH 720°  BATT 38°  BIAS 55%F  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+The KERS / boost slots render **fully transparent** (no black stripe) on cars
+that lack a hybrid system or a turbo — the widget rectangle stays the same
+height across cars, but cars without those features get a cleaner top edge.
+
 | Element     | What it shows                                                                         |
 | ----------- | ------------------------------------------------------------------------------------- |
-| Boost bar   | Current turbo boost as a fraction of `max_turbo_boost` (white below 90 %, green above). Hidden on naturally-aspirated cars (`max_turbo_boost ≤ 0.05`). The numeric label is `bar`, two-pass painted so it's legible over both filled and empty regions. |
-| RPM bar     | Engine speed as a fraction of redline. Uses `rpm_percent` from the graphics block when available, otherwise `rpm / max_rpm`. Colour normally tracks the power curve (white → blue → green at peak power → red past peak), but a **shift-up hint forces red** (treat as a shift light) and a **shift-down hint forces blue**. |
-| HP label    | `current_bhp` from the graphics block when available; otherwise the synthesised power curve interpolated at the current RPM, scaled by `(1 + boost)` as a rough boosted-output approximation. |
+| KERS / battery bar | Hybrid battery state-of-charge (0..1). Fill colour tracks SoC (green > 50 %, yellow > 20 %, else red), and turns **blue** whenever the battery is actively deploying (energy leaving the pack). The slot stays **transparent** on pure-ICE cars — auto-detected by `graphics.has_kers` on AC Evo and an activity heuristic (charge moved or throughput counter ticked) elsewhere. Label: `BAT N / M kJ` when the car publishes capacity, otherwise `BAT NN %`. |
+| Boost bar   | Current turbo boost as a fraction of `max_turbo_boost` (white below 90 %, green above). Slot is **transparent** on naturally-aspirated cars (`max_turbo_boost ≤ 0.05`); the rolling-max calibration only starts once a turbo car publishes a non-zero boost. The numeric label is `bar`, two-pass painted so it's legible over both filled and empty regions. |
+| RPM bar     | Engine speed as a fraction of redline. Uses `rpm_percent` from the graphics block when available, otherwise `rpm / max_rpm`. Colour tracks the engine's actual peak — on AC1 it uses the **real torque curve from the car's ACD** (engine.ini POWER_CURVE), on other games it self-calibrates from observed live BHP. White → blue (approaching peak) → green (at peak power) → red (past peak). **Shift-up hint forces red**, **shift-down hint forces blue** (the bar acts as a shift light). |
+| HP label    | `current_bhp` from the graphics block when available; otherwise the synthesised power curve interpolated at the current RPM, scaled by `(1 + boost)`. On AC1 with `data.acd` loaded, this is the real per-RPM HP plus any hybrid deploy contribution folded in. |
 | Gear label  | `R` (reverse), `N` (neutral) or the forward gear number — matches AC's `0=R, 1=N, 2+=forward` convention. Speed in km/h sits next to it. |
 | RPM label   | Live engine speed in RPM.                                                             |
-| Aid chips   | Up to 10 driver-aid / status chips, **only rendered while their condition is true**. The strip auto-compresses when many fire at once so nothing clips: `PIT` (yellow, pit limiter), `TC` (green, traction control — bright when cutting, dim when armed-but-idle), `ABS` (blue, same scheme), `ESC` (red, stability control), `LC` (green, launch control), `DRS` (blue, **bright when deployed**, dim when only available), `ERS` (yellow, kers/battery charging), `WW` (red, wrong way), `INV` (red, lap invalidated by a cut), `LAST` (white, final lap). |
-| Readouts    | Bottom row: `WAT` water temp °C, `OIL` oil temp °C, `OPR` oil pressure bar, `FPR` fuel pressure bar, `EXH` exhaust temp °C, `BAT` battery V, `FUEL` litres, `BIAS` brake bias (%F front). Cells whose source publishes nothing for the current car are hidden so the strip shows only live values. |
+| Aid chips   | Up to 14 driver-aid / status chips, **only rendered while their condition is true**. The strip auto-compresses when many fire at once so nothing clips: `PIT` (yellow, pit limiter), `TC` (green, traction control — bright when cutting, dim when armed-but-idle), `ABS` (blue, same scheme), `ESC` (red, stability control), `LC` (green, launch control), `DRS` (blue, **bright when deployed**, dim when only available), `ERS` (yellow, kers/battery charging), `OT` (blue, ERS overtake / max-deploy mode armed — AC EVO), `HEAT` (red, ERS heat charging on — AC EVO), `KMAX` (red, per-lap deploy energy cap reached — AC EVO), `CMAX` (yellow, per-lap charge energy cap reached — AC EVO), `WW` (red, wrong way), `INV` (red, lap invalidated by a cut), `LAST` (white, final lap). |
+| Readouts    | Bottom row: `WAT` water temp °C, `OIL` oil temp °C, `OPR` oil pressure bar, `FPR` fuel pressure bar, `EXH` exhaust temp °C, `BAT` battery V, `BATT` battery temp °C (AC EVO), `FUEL` litres, `BIAS` brake bias (%F front). Cells whose source publishes nothing for the current car are hidden so the strip shows only live values. |
 
 #### Icon vs. text fallback (engine bar)
 
@@ -247,8 +292,12 @@ Icon-name mapping:
 | ESC | `car-esp` | FPR | `gas-station` |
 | LC  | `rocket-launch` | EXH | `smoke` |
 | DRS | `car-cruise-control` | BAT | `car-battery` |
-| ERS | `battery-charging` | FUEL | `fuel` |
-| WW  | `alert` | BIAS | `car-brake-parking` |
+| ERS | `battery-charging` | BATT | `thermometer` |
+| OT  | `lightning-bolt` | FUEL | `fuel` |
+| HEAT | `fire` | BIAS | `car-brake-parking` |
+| KMAX | `battery-alert` | | |
+| CMAX | `battery-charging-100` | | |
+| WW  | `alert` | | |
 | INV | `flag-remove` | | |
 | LAST | `flag-checkered` | | |
 
@@ -306,8 +355,8 @@ edge. Icons are tinted PNGs cached as alpha masks and re-coloured every frame.
 | Tyre-load circle      | White ring centred on the silhouette. Diameter scales linearly with vertical wheel load: **0.049 px / N**, clamped to 40…256 px. A typical static corner load (~3 000 N) fills the inner half; the ring saturates around ~5 200 N. |
 | Camber rotation       | The whole tire silhouette (with its IMO temp grid and dirt overlay) **rotates around its centre** by the live `camberRAD` value, visually amplified ×2 so a typical −2.5° setup reads as a ~5° tilt. Negative camber leans the **top** of the tire toward the car centre (= toward the screen-centre side of the widget) on both left and right wheels — the per-wheel raw-camber sign flip from `camberRAD` (ac_evo.py §9.7a) is handled internally so the tilt direction is consistent across the four corners. |
 | Contact patch bars    | Three white vertical bars hanging from the tire's bottom edge **are** the ground reference (there is no separate ground line). Each bar represents a lateral face of the contact patch — `inner / middle / outer`, with **inner** on the screen-centre-facing side — and its height encodes a `camber × pressure × load` heuristic: camber decides the lateral bias (tall inner bar under negative camber), pressure decides crown vs. bow (under-inflation grows the edge bars and shrinks middle; over-inflation reverses), load scales the overall extent. AC Evo doesn't publish tyre dimensions or stiffness so the bars are a qualitative indicator, not a calibrated geometry — temperatures (the high-fidelity contact-pressure proxy) live in the IMO band on the tire itself, the bars only convey *which lateral part is touching*. |
-| Suspension bar        | Tinted suspension graphic on the **outer** side of the wheel. The colour band reflects how close to the bump-stops you are: white = mid-travel, **yellow** outside ±10 % of the calibrated max, **red** outside ±5 %. The inner fill is the original AC plugin convention — the bar **fills at full extension and shrinks as the suspension compresses** (height ∝ `1 − travel_ratio`). Counter-intuitive vs a typical "load grows" gauge but kept for parity. The max travel auto-calibrates from observation, since AC Evo no longer publishes a per-car `suspensionMaxTravel`. |
-| Brake icon (top-inner)| Tinted by **brake disc temperature** (curve peak ≈ 400 °C; cold below ~150 °C and hot above ~600 °C reduce stopping power). Per-wheel **lock** triggers a 0.5 s yellow blink; **ABS modulating on this wheel** triggers a continuous blue blink. The °C label below the icon stays in the temperature-tint colour for legibility. |
+| Suspension bar        | Tinted suspension graphic on the **outer** side of the wheel. The colour band reflects how close to the bump-stops you are: mid-band paints **white** when the engineered max is known (per-car `static.suspensionMaxTravel`), or **blue** when the bar is self-calibrating against the highest observed travel this session (AC Evo always, mod cars elsewhere). **Yellow** outside ±10 % of the calibrated max, **red** outside ±5 %. The inner fill is the original AC plugin convention — the bar **fills at full extension and shrinks as the suspension compresses** (height ∝ `1 − travel_ratio`). Counter-intuitive vs a typical "load grows" gauge but kept for parity. |
+| Brake icon (top-inner)| **AC Evo / ACC / AC Rally:** tinted by **brake disc temperature** (curve peak ≈ 400 °C; cold below ~150 °C and hot above ~600 °C reduce stopping power); the °C label below the icon stays in the temperature-tint colour. **AC1:** the game never writes `brakeTemp`, so the icon sits on a neutral white base with no °C label. Either way, per-wheel **lock** triggers a 0.5 s yellow blink and **ABS modulating on this wheel** triggers a continuous blink — **white** on games with temp tint (so the blink contrasts against cold-blue / warm-green / hot-red alike), **blue** on AC1 (against the white base). |
 | Disk / Pads wear bars | Two horizontal bars in the brake column between the brake-temperature label and the pressure icon, titled **`Disk Wear`** and **`Pads Wear`**. Each fills left → right (full bar = fresh) with green > 50 % life, yellow > 20 %, red below. Self-calibrated against the per-wheel max observed since session start, since AC EVO's `padLife` / `discLife` raw scale isn't pinned down — "max seen" stands in for "fresh", so the bar starts full and only shrinks. |
 | Pressure icon (mid-inner) | Tinted by **normalised pressure** (1.0 = ideal cold pressure for the current compound). Bands sit tight: green within ±0.02 of 1.0, lerp through 0.01, then solid blue (under) or red (over). The label is the **raw psi value**. |
 | Ride-height icon (outer-bottom) | White most of the time. Drops to red for 0.5 s when the height falls below 20 mm (bottoming-out warning). Label in mm. AC Evo cars publish per-axle ride height in metres for some cars and millimetres for others — the source auto-detects: any value with `|height| ≥ 1.0` is treated as mm, otherwise it's metres × 1000. |
@@ -363,24 +412,33 @@ as "remaining grip".
 
 ## Persistence
 
-State is stored as a single JSON file at
-`%APPDATA%\LiveTelemetryEvo\Overlay\positions.json`
-(`QStandardPaths.AppConfigLocation`).
+State and logs live **next to the executable** so the user can browse
+them in the same Explorer window the app was launched from — no
+`%APPDATA%` hunting. Resolution policy:
 
-Schema:
+- **Frozen build (.exe)** — `<exe-dir>\positions.json` and
+  `<exe-dir>\logs\*.csv`.
+- **Dev (`python -m overlay`)** — current working directory; both paths
+  are git-ignored.
+- **Override** — set `LIVE_TELEMETRY_DATA_DIR=<abs-path>` to redirect
+  both (useful for a portable install on a shared machine).
+
+`positions.json` schema:
 
 ```json
 {
   "engine": { "x": 700, "y": 16, "visible": true },
   "FL":     { "x": 16,  "y": 200 },
-  "size_index": 2
+  "size_index": 2,
+  "polling_hz": 60
 }
 ```
 
 A position is honoured on next launch only if the widget would land fully on screen
 at the current resolution; otherwise it falls back to the layout default. *Reset*
 (hotkey `Ctrl+Alt+R` or the tray entry) wipes the telemetry-widget entries; the
-persisted `size_index` is preserved and only changes via `Ctrl+Alt+S` or the tray.
+persisted `size_index` and `polling_hz` are preserved and only change via their
+own controls.
 
 ---
 
@@ -451,29 +509,34 @@ and the overlay needs to be re-pointed at a moved field.
 ```
 src/overlay/
 ├── __main__.py                # `python -m overlay` entry point
-├── app.py                     # CLI parsing, layout + size cycling, ties widgets to the source
+├── app.py                     # CLI parsing, layout + size cycling, threads the source
 ├── window.py                  # frameless / translucent / always-on-top window + Win32 hotkeys
-├── tray.py                    # system-tray icon + context menu (reset / click-through / size / quit)
+├── tray.py                    # system-tray icon + context menu (reset / click-through / size / Hz / logging / quit)
 ├── layout.py                  # screen-size → multiplier and corner placements
-├── settings.py                # JSON-backed positions / visibility / size persistence
+├── settings.py                # JSON-backed positions / visibility / size / polling-Hz persistence
+├── paths.py                   # always-local config + logs folder resolution
+├── frame_bus.py               # cross-thread TelemetryFrame transport (latest-snapshot + CSV queue)
+├── logger.py                  # CsvLogger — writer thread, schema auto-built from dataclasses
 ├── colors.py                  # palette ported from lt_colors.py
 ├── fonts.py                   # explicit font family chain
 ├── interpolation.py           # Power, TirePsi, TireTemp interpolators
 ├── resources.py               # PNG load + scaled-mask cache + tint helper
 ├── telemetry.py               # data shapes (TelemetryFrame / EngineData / WheelData)
 ├── sources/
-│   ├── base.py                # TelemetrySource (Qt object emitting `frame`)
+│   ├── base.py                # TelemetrySource (Qt object, lives on a worker QThread)
 │   ├── synthetic.py           # mock data generator
 │   ├── ac_evo.py              # AC Evo shared-memory reader
-│   ├── ac1.py                 # original Assetto Corsa shared-memory reader
+│   ├── ac1.py                 # original Assetto Corsa shared-memory reader (+ ACD parser)
+│   ├── ac1_acd.py             # decrypts `data.acd` to surface torque + tyre curves + ideal psi
 │   ├── acc.py                 # Assetto Corsa Competizione shared-memory reader
 │   ├── acrally.py             # Assetto Corsa Rally shared-memory reader
 │   ├── _win32_mapping.py      # NamedMapping (OpenFileMappingW) shared by all live readers
 │   └── dump.py                # `python -m overlay.sources.dump` for SHM debugging
 └── widgets/
-    ├── countdown.py           # full-screen 5 s countdown shown at startup
+    ├── countdown.py           # post-detection countdown — shows detected game name + digit
+    ├── detection.py           # full-screen "Detecting AC Environment..." poller
     ├── draggable.py           # base widget — drag, click, close button
-    ├── engine_view.py         # boost bar + RPM/power bar + HP/RPM labels + aid chips + analog readouts
+    ├── engine_view.py         # battery / boost / RPM bars + HP/RPM labels + aid chips + analog readouts
     ├── inputs_view.py         # pedals + steering + FFB + G-meter + damage / tyres-out / mode
     └── wheel_view.py          # tire, temps, pressure, suspension, wear, camber, height, dirt, lock, load
 ```
