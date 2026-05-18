@@ -162,11 +162,14 @@ class EngineView(DraggableWidget):
         """
         p.fillRect(BATTERY_BAR_RECT, Colors.black)
 
-        # Detection. Capacity > 0 is the strongest signal; if missing,
-        # any movement off the first-frame charge value or any tick of
-        # the throughput counter is enough.
+        # Detection. AC EVO publishes ``has_kers`` directly so the
+        # source flips that True the moment we connect to a hybrid car —
+        # the activity heuristics below cover AC1 / mods where the flag
+        # isn't filled in: capacity > 0 is the next strongest signal,
+        # then any movement off the first-frame charge or any tick of
+        # the throughput counter.
         if not self._kers_visible:
-            if d.kers_max_j > 0.0 or d.kers_current_kj > 0.0:
+            if d.has_kers or d.kers_max_j > 0.0 or d.kers_current_kj > 0.0:
                 self._kers_visible = True
             elif self._kers_spawn_charge is None:
                 self._kers_spawn_charge = d.kers_charge
@@ -243,6 +246,17 @@ class EngineView(DraggableWidget):
             chips.append(("DRS", Colors.blue, d.drs_enabled, "car-cruise-control"))
         if d.ers_charging:
             chips.append(("ERS", Colors.yellow, True, "battery-charging"))
+        if d.ers_overtake_mode:
+            # Max-deploy mode armed — bright blue so it reads alongside DRS.
+            chips.append(("OT", Colors.blue, True, "lightning-bolt"))
+        if d.ers_heat_charging:
+            chips.append(("HEAT", Colors.red, True, "fire"))
+        if d.kers_lap_deploy_capped:
+            # No more deploy energy this lap — useful for the driver to know
+            # why pressing the button stopped doing anything.
+            chips.append(("KMAX", Colors.red, True, "battery-alert"))
+        if d.kers_lap_charge_capped:
+            chips.append(("CMAX", Colors.yellow, True, "battery-charging-100"))
         if d.wrong_way:
             chips.append(("WW", Colors.red, True, "alert"))
         if not d.valid_lap:
@@ -309,6 +323,8 @@ class EngineView(DraggableWidget):
             cells.append(("smoke", "EXH", f"{int(d.exhaust_temp_c)}°C"))
         if d.battery_voltage > 0.0:
             cells.append(("car-battery", "BAT", f"{d.battery_voltage:.1f}V"))
+        if d.battery_temp_c > 0.0:
+            cells.append(("thermometer", "BATT", f"{int(d.battery_temp_c)}°C"))
         if d.fuel_liters > 0.0:
             cells.append(("fuel", "FUEL", f"{d.fuel_liters:.0f}L"))
         if d.brake_bias > 0.0:

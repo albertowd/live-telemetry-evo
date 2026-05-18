@@ -135,6 +135,22 @@ class EngineData:
     kers_current_kj: float = 0.0   # cumulative throughput counter
     kers_input: float = 0.0        # driver deploy request 0..1
     kers_deploy_kw: float = 0.0    # smoothed deploy power, derived in source
+    # AC EVO graphics block surfaces a direct hybrid-equipped flag plus
+    # per-lap energy caps and battery thermals — AC1 has none of these,
+    # so defaults keep its behaviour. ``has_kers`` is the strongest
+    # battery-bar auto-detect signal; the lap-cap flags drive chip
+    # indicators so the driver knows why deploy/charge stopped.
+    has_kers: bool = False
+    battery_temp_c: float = 0.0
+    kers_lap_deploy_capped: bool = False
+    kers_lap_charge_capped: bool = False
+    # ERS strategy state — overtake mode (max-deploy) and heat charging
+    # come from the electronics substruct. Map levels are -1 = unknown so
+    # a future ERS-panel widget can hide cells the source can't fill.
+    ers_overtake_mode: bool = False
+    ers_heat_charging: bool = False
+    ers_deployment_map: int = -1
+    ers_recharge_map: float = -1.0
 
 
 @dataclass

@@ -422,33 +422,43 @@ class WheelView(DraggableWidget):
         p.drawRect(QRectF(inner.x(), inner.y(), inner.width(), max(0.0, fill_h)))
 
     def _draw_lock(self, p: QPainter, d: WheelData, delta_t: float) -> None:
-        # Hide the whole brake icon when no real disc temperature signal
-        # exists (AC1's brakeTemp slot is dead). The icon's main purpose
-        # is the temperature tint plus ABS/lock blink — without a live
-        # temp it would be a permanently-neutral square that misleads.
-        if not d.has_brake_temp:
-            return
         rect = QRectF(self._x_left(70.0, 60.0), 0.0, 60.0, 60.0)
 
         if d.lock:
             self._lock_warn_until = time.monotonic() + WARNING_TIME_S
 
-        # Default tint reflects brake disc temperature; ABS/lock override it.
-        temp_color = QColor(self._brake_temp.interpolate_color(d.brake_t, d.brake_t_norm))
+        # Base tint depends on whether the game publishes brake temp:
+        #   * has_brake_temp=True  → temperature-curve tint (cold→blue,
+        #     ideal→green, hot→red). ABS blinks **white** so the cue
+        #     reads against any temp colour — blue would vanish into
+        #     the cold-brake-blue tint.
+        #   * has_brake_temp=False (AC1) → neutral white base (no temp
+        #     data to show). ABS blinks **blue** for contrast against
+        #     the white, matching the rest of the overlay's "blue means
+        #     ABS" convention.
+        # Either way the icon stays on-screen so the ABS / lock blink is
+        # always visible — previously AC1 hid the whole brake column and
+        # the blink was lost.
+        if d.has_brake_temp:
+            base_color = QColor(self._brake_temp.interpolate_color(d.brake_t, d.brake_t_norm))
+            abs_blink = Colors.white
+        else:
+            base_color = QColor(Colors.white)
+            abs_blink = Colors.blue
 
         if d.abs_active:
-            # ABS modulating on this wheel: blink blue/temp so the moment
-            # the system intervenes is visible at a glance, mirroring the
-            # yellow lock-warning blink below.
+            # ABS modulating on this wheel: blink against the base tint
+            # so the moment the system intervenes is visible at a glance,
+            # mirroring the yellow lock-warning blink below.
             self._lock_blink_t += delta_t
             blink_on = int(self._lock_blink_t / LOCK_BLINK_PERIOD_S) % 2 == 0
-            color = Colors.blue if blink_on else temp_color
+            color = abs_blink if blink_on else base_color
         elif time.monotonic() < self._lock_warn_until:
             self._lock_blink_t += delta_t
             blink_on = int(self._lock_blink_t / LOCK_BLINK_PERIOD_S) % 2 == 0
-            color = Colors.yellow if blink_on else temp_color
+            color = Colors.yellow if blink_on else base_color
         else:
-            color = temp_color
+            color = base_color
             self._lock_blink_t = 0.0
 
         # Disc temperature drives the *tint* (set above) only. The icon
@@ -458,14 +468,16 @@ class WheelView(DraggableWidget):
         # two signals.
         _draw_tinted(p, "brake", rect, color)
 
-        # Disc temperature label below the icon, always in the temp-tint
-        # color so the value stays legible even when ABS/lock force the
-        # icon blue/yellow.
-        p.setFont(label_font(18))
-        p.setPen(temp_color)
-        label_rect = QRectF(rect.x() - 20.0, rect.bottom() + 2.0,
-                            rect.width() + 40.0, 22.0)
-        p.drawText(label_rect, Qt.AlignCenter, f"{int(d.brake_t)} °C")
+        # Disc temperature label below the icon, in the temp-tint colour
+        # so the value stays legible even when ABS/lock force the icon
+        # to the blink colour. Skipped when the game doesn't publish
+        # brake temp (AC1) so we don't pretend a value exists.
+        if d.has_brake_temp:
+            p.setFont(label_font(18))
+            p.setPen(base_color)
+            label_rect = QRectF(rect.x() - 20.0, rect.bottom() + 2.0,
+                                rect.width() + 40.0, 22.0)
+            p.drawText(label_rect, Qt.AlignCenter, f"{int(d.brake_t)} °C")
 
     def _draw_wear_bars(self, p: QPainter, d: WheelData) -> None:
         """Horizontal Disk / Pads / Tire wear bars stacked between the
@@ -506,7 +518,10 @@ class WheelView(DraggableWidget):
         title_rect_w = 100.0
         row_h = title_h + 2.0 + bar_h
 
-        top_y = 86.0 if d.has_brake_temp else 2.0
+        # The brake icon is always drawn (y=0..60). With temp the °C label
+        # sits below it (y=62..84) and wear bars start at 86; without temp
+        # (AC1) the label is skipped, so bars can come up to y=66.
+        top_y = 86.0 if d.has_brake_temp else 66.0
         bottom_y = 168.0  # ~3 px above the pressure icon at y=171
         span = bottom_y - top_y
         n = len(rows)

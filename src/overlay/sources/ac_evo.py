@@ -718,7 +718,6 @@ class AcEvoTelemetrySource(TelemetrySource):
         # _update_kers_deploy). AC Evo publishes ``current_bhp`` from
         # the game so the widget doesn't need this for HP, but the
         # battery bar consumes it for the "deploying" colour cue.
-        self._prev_kers_charge: Optional[float] = None
         self._prev_kers_current_kj: Optional[float] = None
         self._last_kers_tick: Optional[float] = None
         self._timer = QTimer(self)
@@ -789,25 +788,32 @@ class AcEvoTelemetrySource(TelemetrySource):
         del st
 
     def _update_kers_deploy(self, e) -> None:
-        """Derive ``kers_deploy_kw`` — see ac1.py for the long-form
-        explanation. AC Evo uses the same throughput-counter convention
-        (``physics.kersCurrentKJ``) and the same SoC drop as the
-        directional cue."""
+        """Derive ``kers_deploy_kw`` from the throughput-counter delta,
+        gated by the documented ``ersIsCharging`` flag (AC1 had to infer
+        the directional signal from a SoC drop because the flag wasn't
+        published — see ac1.py for the long-form rationale).
+
+        The counter is monotonic and ticks during both charge and deploy,
+        so the flag is the only thing separating the two — when
+        ``e.ers_charging`` is false and the counter ticks, it must be
+        deploy energy.
+
+        Using the explicit flag also fixes the SoC-drop heuristic's blind
+        spots: it failed when SoC was pinned at 0/1 and was fragile under
+        single-precision quantisation jitter."""
         now = time.monotonic()
         if (self._last_kers_tick is None
-                or self._prev_kers_charge is None
                 or self._prev_kers_current_kj is None):
             raw_kw = 0.0
         else:
             delta_t = now - self._last_kers_tick
-            if delta_t > 0.0 and e.kers_charge < self._prev_kers_charge:
+            if delta_t > 0.0 and not e.ers_charging:
                 raw_kw = max(0.0,
                              (e.kers_current_kj - self._prev_kers_current_kj)
                              / delta_t)
             else:
                 raw_kw = 0.0
         e.kers_deploy_kw = 0.7 * e.kers_deploy_kw + 0.3 * raw_kw
-        self._prev_kers_charge = e.kers_charge
         self._prev_kers_current_kj = e.kers_current_kj
         self._last_kers_tick = now
 
@@ -833,12 +839,23 @@ class AcEvoTelemetrySource(TelemetrySource):
         # populated in _apply_graphics. The active-cut blink is keyed off
         # tc_in_action / abs_in_action below.
         e.pit_limiter = bool(ph.pitLimiterOn)
-        # tcInAction / absInAction are the documented "currently cutting"
-        # ints — the precise signal we want for the bright-vs-dim chip
-        # blink, more accurate than the HUD-level tc_active/abs_active
-        # bools in graphics.
-        e.tc_in_action = ph.tcInAction != 0
-        e.abs_in_action = ph.absInAction != 0
+        # "Currently cutting" — merged from every signal the game
+        # publishes:
+        #   * physics.tcInAction / absInAction — documented int flags
+        #   * physics.tc / abs — intervention intensity (0..1 float)
+        #   * graphics.tc_active / abs_active — HUD-level bool flags
+        #     (set in _apply_graphics; we OR them in here)
+        # Some car/build combos leave the physics ints permanently 0
+        # even with ABS actively modulating — verified live, this is
+        # why the wheel-widget brake disk wasn't blinking blue. The
+        # float intensity and the graphics bool both fire reliably in
+        # those cases, so OR-ing all three keeps the cue responsive.
+        e.tc_in_action = (e.tc_in_action
+                          or ph.tcInAction != 0
+                          or float(ph.tc) > 0.0)
+        e.abs_in_action = (e.abs_in_action
+                           or ph.absInAction != 0
+                           or float(ph.abs) > 0.0)
         # Driver-set values that live in physics rather than graphics.
         e.brake_bias = float(ph.brakeBias)
         # AC Evo's `drs` is 0..1 deploy state; treat anything > 0.5 as
@@ -854,6 +871,13 @@ class AcEvoTelemetrySource(TelemetrySource):
         # the % readout for cars with a battery.
         e.kers_current_kj = float(ph.kersCurrentKJ)
         e.kers_input = float(ph.kersInput)
+        # ersIsCharging is the documented directional flag (0 = deploying,
+        # 1 = charging). OR with the graphics-side flags already set in
+        # _apply_graphics so any source of "charging now" wins — physics
+        # ticks faster than graphics, graphics covers cars where the
+        # physics flag isn't wired. _update_kers_deploy reads the merged
+        # value as the deploy gate.
+        e.ers_charging = e.ers_charging or bool(ph.ersIsCharging)
 
         # Phase 3 — driver inputs / dynamics / car state. Pedals come in
         # as 0..1 from physics; the graphics block also publishes _percent
@@ -877,7 +901,10 @@ class AcEvoTelemetrySource(TelemetrySource):
         i.tyres_out = int(ph.numberOfTyresOut)
 
         braking = ph.brake > 0.0
-        abs_modulating = ph.absInAction != 0
+        # Use the merged in-action flag (graphics bool OR physics int OR
+        # physics intensity) rather than the raw int alone — some cars
+        # leave absInAction dead but still fire the other two signals.
+        abs_modulating = e.abs_in_action
         # Latch the tyre-wear-is-live flag once any corner publishes a
         # non-zero. Current builds leave tyreWear dead; this surfaces
         # the bar automatically when a future build starts populating it.
@@ -888,11 +915,20 @@ class AcEvoTelemetrySource(TelemetrySource):
             idx = _WHEEL_INDEX[wid]
             w = self._frame.wheels[wid]
 
-            slip = float(ph.wheelSlip[idx])
+            # Per-wheel slip — prefer EVO's documented slipRatio (signed
+            # longitudinal slip ratio) over the legacy AC1 ``wheelSlip``.
+            # Take the max magnitude of both so the heuristic still works
+            # on cars where one field is dead.
+            slip = max(abs(float(ph.slipRatio[idx])),
+                       abs(float(ph.wheelSlip[idx])))
             # ABS active on this wheel = system is modulating + this wheel
-            # has the slip signature that triggered it. Per-wheel `lock`
+            # has measurable slip. The previous 0.10 threshold meant the
+            # cue only lit up *after* ABS lost the wheel — by design ABS
+            # keeps slip right around the ideal ~10 %, so a high threshold
+            # never fires during normal modulation. 0.03 catches the cue
+            # while the system is actively controlling. Per-wheel ``lock``
             # is sourced from the graphics tyre states in _apply_graphics.
-            w.abs_active = abs_modulating and braking and not w.lock and slip > 0.10
+            w.abs_active = abs_modulating and braking and not w.lock and slip > 0.03
 
             w.camber = float(ph.camberRAD[idx])
             # PDF says suspensionTravel is "compression in metres" (i.e.
@@ -978,6 +1014,11 @@ class AcEvoTelemetrySource(TelemetrySource):
         e.esc_active = bool(gr.esc_active)
         e.launch_active = bool(gr.launch_active)
         e.drs_available = bool(gr.is_drs_available)
+        # tc_active / abs_active are the HUD-level "actively intervening
+        # this frame" bools. Seed the in-action flags here; _apply_physics
+        # ORs in the physics-side signals (ints + intensity floats) after.
+        e.tc_in_action = bool(gr.tc_active)
+        e.abs_in_action = bool(gr.abs_active)
         # Either the discrete KERS-charging flag or the broader battery
         # one is enough to light the ERS chip — different engine types
         # populate different fields.
@@ -986,6 +1027,21 @@ class AcEvoTelemetrySource(TelemetrySource):
         # uses). Static block has no kersMaxJ on AC Evo, so the widget
         # auto-falls-back to a %-of-charge readout.
         e.kers_charge = float(gr.kers_charge_perc)
+        # Direct hybrid-equipped flag — preferred over the engine widget's
+        # activity-based auto-detect, since it's correct even before the
+        # battery has been touched.
+        e.has_kers = bool(gr.has_kers)
+        e.battery_temp_c = float(gr.battery_temperature)
+        # Per-lap energy caps — set when the regulation budget for this
+        # lap is exhausted (deploy) or saturated (charge). Drives the
+        # KMAX/CMAX chips so the driver knows why deploy/charge stopped.
+        e.kers_lap_deploy_capped = bool(gr.is_max_kj_per_lap_reached)
+        e.kers_lap_charge_capped = bool(gr.is_max_charge_kj_per_lap_reached)
+        # ERS strategy state from the electronics substruct.
+        e.ers_overtake_mode = bool(gr.electronics.is_ers_overtake_mode_on)
+        e.ers_heat_charging = bool(gr.electronics.is_ers_heat_charging_on)
+        e.ers_deployment_map = int(gr.electronics.ers_deployment_map)
+        e.ers_recharge_map = float(gr.electronics.ers_recharge_map)
         e.wrong_way = bool(gr.is_wrong_way)
         e.valid_lap = bool(gr.is_valid_lap)
         e.last_lap = bool(gr.is_last_lap)
