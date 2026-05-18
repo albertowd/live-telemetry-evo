@@ -383,8 +383,15 @@ class AcTelemetrySource(TelemetrySource):
             e.max_power = float(st.maxPower)
         if st.maxTorque > 0:
             e.max_torque = float(st.maxTorque)
-        if st.maxTurboBoost > 0:
-            e.max_turbo_boost = float(st.maxTurboBoost)
+        # NOTE: ``static.maxTurboBoost`` is deliberately NOT used here.
+        # It's unreliable on a lot of mod cars (often inflated above what
+        # the engine actually maps to at full throttle), so seeding it
+        # leaves the boost bar never reaching its right edge — the
+        # denominator is bigger than any boost the car will ever read.
+        # The sibling LiveTelemetry plugin made the same choice for the
+        # same reason. ``_apply_physics`` runs a rolling max against
+        # observed ``turbo_boost`` instead, so the bar's right edge
+        # tracks the highest boost actually achieved this session.
         # AC1 publishes the battery capacity here (AC Evo's static block
         # dropped this field). 0.0 means "no battery" *or* "mod author
         # didn't fill it in" — the engine widget gracefully falls back
