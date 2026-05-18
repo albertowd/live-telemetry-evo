@@ -46,6 +46,11 @@ class SyntheticTelemetrySource(TelemetrySource):
     def stop(self) -> None:
         self._timer.stop()
 
+    def set_hz(self, hz: int) -> None:
+        hz = max(1, int(hz))
+        self._dt = 1.0 / hz
+        self._timer.setInterval(int(1000 / hz))
+
     def _tick(self) -> None:
         self._t += self._dt
         t = self._t
@@ -199,4 +204,6 @@ class SyntheticTelemetrySource(TelemetrySource):
             w.lock = hard_brake and slip_mock and is_front
             w.abs_active = hard_brake and not w.lock and is_front
 
+        if self._bus is not None:
+            self._bus.publish(self._frame)
         self.frame.emit(self._frame)

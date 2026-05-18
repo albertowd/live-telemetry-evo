@@ -332,6 +332,9 @@ class AcTelemetrySource(TelemetrySource):
         self._timer.stop()
         self._reader.close()
 
+    def set_hz(self, hz: int) -> None:
+        self._timer.setInterval(int(1000 / max(1, int(hz))))
+
     def _try_connect(self) -> bool:
         if self._reader.is_open:
             return True
@@ -365,6 +368,8 @@ class AcTelemetrySource(TelemetrySource):
 
         self._apply_graphics(graphics)
         self._apply_physics(phys)
+        if self._bus is not None:
+            self._bus.publish(self._frame)
         self.frame.emit(self._frame)
 
     def _apply_static(self, st: _SPageFileStatic) -> None:

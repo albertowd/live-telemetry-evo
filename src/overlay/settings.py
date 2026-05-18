@@ -124,3 +124,18 @@ def save_size_index(idx: int) -> None:
     data = _read()
     data["size_index"] = int(idx)
     _write(data)
+
+
+def load_polling_hz(default: int, allowed: tuple[int, ...]) -> int:
+    """Return the persisted polling rate, snapping to one of ``allowed``.
+    Anything else (corrupt entry, removed value) falls back to ``default``."""
+    val = _read().get("polling_hz")
+    if isinstance(val, int) and val in allowed:
+        return val
+    return default
+
+
+def save_polling_hz(hz: int) -> None:
+    data = _read()
+    data["polling_hz"] = int(hz)
+    _write(data)

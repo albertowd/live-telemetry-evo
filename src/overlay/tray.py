@@ -21,6 +21,12 @@ def make_tray(
     on_set_size: Callable[[int], None],
     current_size_index: Callable[[], int],
     size_labels: Sequence[str],
+    on_set_polling_hz: Callable[[int], None],
+    current_polling_hz: Callable[[], int],
+    polling_hz_options: Sequence[int],
+    on_toggle_logging: Callable[[], None],
+    is_logging: Callable[[], bool],
+    on_open_logs_folder: Callable[[], None],
     on_quit: Callable[[], None],
     reset_shortcut: str | None = None,
     click_through_shortcut: str | None = None,
@@ -84,6 +90,33 @@ def make_tray(
         a.triggered.connect(lambda _checked, i=idx: on_set_size(i))
         size_actions.append(a)
 
+    # Polling-Hz submenu: drives the SHM poll cadence (and, once
+    # logging is enabled, the CSV row rate). Independent from the UI
+    # repaint timer, which runs at the display refresh rate.
+    hz_menu = menu.addMenu("Polling Hz")
+    hz_group = QActionGroup(hz_menu)
+    hz_group.setExclusive(True)
+    hz_actions: list[tuple[int, QAction]] = []
+    for hz in polling_hz_options:
+        a = QAction(f"{hz} Hz", hz_menu)
+        a.setCheckable(True)
+        hz_group.addAction(a)
+        hz_menu.addAction(a)
+        a.triggered.connect(lambda _checked, h=hz: on_set_polling_hz(h))
+        hz_actions.append((hz, a))
+
+    menu.addSeparator()
+
+    # CSV logging — single toggle action whose text flips between
+    # "Start logging" / "Stop logging" based on current state.
+    logging_action = QAction("Start logging", menu)
+    logging_action.triggered.connect(lambda _checked: on_toggle_logging())
+    menu.addAction(logging_action)
+
+    open_logs_action = QAction("Open logs folder", menu)
+    open_logs_action.triggered.connect(lambda _checked: on_open_logs_folder())
+    menu.addAction(open_logs_action)
+
     menu.addSeparator()
 
     quit_action = QAction(_with_shortcut("Quit", quit_shortcut), menu)
@@ -95,6 +128,10 @@ def make_tray(
         cur = current_size_index()
         for i, a in enumerate(size_actions):
             a.setChecked(i == cur)
+        cur_hz = current_polling_hz()
+        for hz, a in hz_actions:
+            a.setChecked(hz == cur_hz)
+        logging_action.setText("Stop logging" if is_logging() else "Start logging")
 
     # Re-read state every time the menu opens so checkmarks stay in
     # lockstep with the floating buttons and the Ctrl+Alt+L hotkey.

@@ -3,12 +3,16 @@ from __future__ import annotations
 import argparse
 import sys
 
+from PySide6.QtCore import QThread, QTimer, QUrl, Qt
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication
 
+from .frame_bus import FrameBus
 from .layout import ScreenLayout, compute_layout, pick_resolution
-from .settings import (delete_entries, load_positions, load_size_index,
-                        load_visibility, save_position, save_size_index,
-                        save_visibility)
+from .logger import CsvLogger
+from .settings import (delete_entries, load_polling_hz, load_positions,
+                        load_size_index, load_visibility, save_polling_hz,
+                        save_position, save_size_index, save_visibility)
 from .sources import make_source
 from .telemetry import TelemetryFrame
 from .tray import make_tray
@@ -19,6 +23,14 @@ from .widgets.inputs_view import InputsView
 from .widgets.wheel_view import WheelView
 from .window import (HOTKEY_QUIT_LABEL, HOTKEY_RESET_LABEL, HOTKEY_SIZE_LABEL,
                      HOTKEY_TOGGLE_LABEL, OverlayWindow)
+
+
+# Polling rates exposed in the tray submenu. The source's QTimer runs at
+# the chosen Hz on its dedicated worker thread; UI repaint is independent
+# (display refresh rate). 60 is the default — matches AC's physics step
+# and keeps the EMA-smoothed derivatives (e.g. kers_deploy_kw) tight.
+POLLING_HZ_OPTIONS: tuple[int, ...] = (30, 60, 100, 120, 144, 250)
+DEFAULT_POLLING_HZ = 60
 
 
 _RESETTABLE_IDS = ("engine", "inputs", "FL", "FR", "RL", "RR")
@@ -177,8 +189,11 @@ def _resize_widgets(engine: EngineView, inputs: InputsView,
                        layout.screen_w, layout.screen_h)
 
 
-def _on_frame(frame: TelemetryFrame, engine: EngineView,
-              inputs: InputsView, wheels: dict[str, WheelView]) -> None:
+def _dispatch_frame(frame: TelemetryFrame, engine: EngineView,
+                    inputs: InputsView, wheels: dict[str, WheelView]) -> None:
+    """Push the latest frame to every widget. Called from the UI-side
+    repaint timer (display refresh rate), not from the polling thread —
+    so widget paint events stay decoupled from SHM read latency."""
     engine.set_data(frame.engine)
     inputs.set_data(frame.inputs)
     for wid, view in wheels.items():
@@ -199,7 +214,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
               "'acc' (Assetto Corsa Competizione), 'acrally' (Assetto Corsa "
               "Rally), or 'synthetic' (mock data)"),
     )
-    parser.add_argument("--hz", type=int, default=60, help="sample rate in Hz (default: 60)")
+    parser.add_argument("--hz", type=int, default=0,
+                        help=("polling rate in Hz; 0 = use the value persisted in "
+                              "settings (default 60). Allowed live values: "
+                              "30/60/100/120/144/250."))
     return parser.parse_args(argv)
 
 
@@ -246,12 +264,69 @@ def run(argv: list[str] | None = None) -> int:
     def _do_reset() -> None:
         _reset_layout(engine, inputs, wheels, layout)
 
+    # --- Telemetry transport: bus + repaint timer + worker thread ----
+    bus = FrameBus()
+    logger = CsvLogger(bus)
+    # Tracks the source name passed in via auto-detect / CLI so the
+    # logger can stamp the CSV filename with it. Filled in by
+    # ``_start_source``.
+    current_source_name = ["unknown"]
+
+    # UI-side repaint at display refresh rate. QScreen.refreshRate()
+    # returns Hz as a float (60.0, 144.0, etc.); fall back to 60 when
+    # the platform doesn't report a real rate.
+    refresh_hz = max(30.0, float(screen.refreshRate() or 60.0))
+    repaint_timer = QTimer(window)
+    repaint_timer.setInterval(int(1000 / refresh_hz))
+
+    def _on_repaint() -> None:
+        f = bus.latest()
+        if f is None:
+            return
+        _dispatch_frame(f, engine, inputs, wheels)
+
+    # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
+    repaint_timer.timeout.connect(_on_repaint)
+    # Started after the source goes live so we don't repaint before the
+    # bus has anything; ``_start_source`` flips it on.
+
+    # Polling Hz — persisted choice trumps the CLI when --hz is 0 (the
+    # default). An explicit ``--hz N`` from the CLI overrides for this
+    # session but is also persisted so the tray submenu reflects it.
+    polling_hz = load_polling_hz(DEFAULT_POLLING_HZ, POLLING_HZ_OPTIONS)
+    if args.hz and args.hz in POLLING_HZ_OPTIONS:
+        polling_hz = args.hz
+        save_polling_hz(polling_hz)
+
+    def _set_polling_hz(hz: int) -> None:
+        nonlocal polling_hz
+        if hz not in POLLING_HZ_OPTIONS:
+            return
+        polling_hz = hz
+        save_polling_hz(hz)
+        src = getattr(window, "_source", None)
+        if src is not None:
+            # Queued signal → worker thread mutates its own QTimer.
+            src.hz_change_requested.emit(hz)
+
+    def _toggle_logging() -> None:
+        if logger.is_active():
+            logger.stop()
+            print(f"[overlay] logging stopped (dropped rows: {bus.csv_dropped})")
+        else:
+            path = logger.start(current_source_name[0])
+            print(f"[overlay] logging started: {path}")
+
+    def _open_logs_folder() -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(CsvLogger.logs_dir())))
+
     # Global hotkeys (registered in window.py via Win32 RegisterHotKey).
     window.reset_hotkey.connect(_do_reset)
     window.size_hotkey.connect(_cycle_size)
 
-    # System-tray icon: reset / click-through / size submenu / quit.
-    # Held by ``window`` so it lives as long as the overlay does.
+    # System-tray icon: reset / click-through / size submenu /
+    # polling Hz submenu / quit. Held by ``window`` so it lives as long
+    # as the overlay does.
     window._tray = make_tray(
         window,
         on_reset=_do_reset,
@@ -260,6 +335,12 @@ def run(argv: list[str] | None = None) -> int:
         on_set_size=_set_size,
         current_size_index=lambda: size_idx,
         size_labels=SIZE_LABELS,
+        on_set_polling_hz=_set_polling_hz,
+        current_polling_hz=lambda: polling_hz,
+        polling_hz_options=POLLING_HZ_OPTIONS,
+        on_toggle_logging=_toggle_logging,
+        is_logging=logger.is_active,
+        on_open_logs_folder=_open_logs_folder,
         on_quit=app.quit,
         reset_shortcut=HOTKEY_RESET_LABEL,
         click_through_shortcut=HOTKEY_TOGGLE_LABEL,
@@ -292,14 +373,42 @@ def run(argv: list[str] | None = None) -> int:
     countdown.finished.connect(_reveal_widgets)
 
     def _start_source(name: str) -> None:
-        source = make_source(name, hz=args.hz, parent=window)
-        source.frame.connect(lambda f: _on_frame(f, engine, inputs, wheels))
-        source.start()
-        # Keep a reference on the window so the QObject isn't GC'd when
+        current_source_name[0] = name
+        # Build the source on the UI thread but with no parent — Qt
+        # forbids moveToThread on a parented object. Wire the bus before
+        # the thread starts; ``set_bus`` is plain Python so the worker
+        # sees the attribute as soon as it begins ticking.
+        source = make_source(name, hz=polling_hz, parent=None)
+        source.set_bus(bus)
+
+        thread = QThread()
+        source.moveToThread(thread)
+        # ``thread.started`` fires on the worker thread, so ``start()``
+        # builds the source's QTimer there — required because Qt timers
+        # only tick on the thread they were started from.
+        # pylint: disable-next=no-member
+        thread.started.connect(source.start)
+        # Clean shutdown when the app quits: stop the timer + close SHM
+        # mappings on the worker thread, then quit the thread loop. The
+        # CSV writer is joined first so its final flush doesn't race the
+        # bus being torn down.
+        # pylint: disable-next=no-member
+        app.aboutToQuit.connect(logger.stop)
+        # pylint: disable-next=no-member
+        app.aboutToQuit.connect(source.stop)
+        # pylint: disable-next=no-member
+        app.aboutToQuit.connect(thread.quit)
+        thread.start()
+        # Keep references on the window so the QObjects aren't GC'd when
         # this closure returns.
         window._source = source
+        window._source_thread = thread
+        # Now that frames will start flowing, kick the UI-side paint loop.
+        repaint_timer.start()
+
         print(
-            f"[overlay] source={name} hz={args.hz} "
+            f"[overlay] source={name} polling_hz={polling_hz} "
+            f"repaint_hz={refresh_hz:.0f} "
             f"screen={geom.width()}x{geom.height()} "
             f"resolution={layout.resolution_name} multiplier={layout.multiplier:.2f} "
             f"engine={layout.engine.w}x{layout.engine.h} "
