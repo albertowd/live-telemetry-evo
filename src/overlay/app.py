@@ -5,7 +5,7 @@ import sys
 
 from PySide6.QtCore import QThread, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from .frame_bus import FrameBus
 from .layout import ScreenLayout, compute_layout, pick_resolution
@@ -16,6 +16,7 @@ from .settings import (delete_entries, load_polling_hz, load_positions,
 from .sources import make_source
 from .telemetry import TelemetryFrame
 from .tray import make_tray
+from .updater import UpdateController
 from .widgets.countdown import CountdownView
 from .widgets.detection import DetectionView
 from .widgets.engine_view import EngineView
@@ -329,6 +330,11 @@ def run(argv: list[str] | None = None) -> int:
     # System-tray icon: reset / click-through / size submenu /
     # polling Hz submenu / quit. Held by ``window`` so it lives as long
     # as the overlay does.
+    # Updater is built before the tray so the tray's "Check for Updates"
+    # action can subscribe to controller state transitions and dispatch
+    # IDLE-click → start_check / READY-click → restart_into_update.
+    window._updater = UpdateController(window)
+
     window._tray = make_tray(
         window,
         on_reset=_do_reset,
@@ -344,12 +350,39 @@ def run(argv: list[str] | None = None) -> int:
         is_logging=logger.is_active,
         on_open_logs_folder=_open_logs_folder,
         on_quit=app.quit,
+        updater=window._updater,
         reset_shortcut=HOTKEY_RESET_LABEL,
         click_through_shortcut=HOTKEY_TOGGLE_LABEL,
         size_shortcut=HOTKEY_SIZE_LABEL,
         quit_shortcut=HOTKEY_QUIT_LABEL,
         logging_shortcut=HOTKEY_LOG_LABEL,
     )
+
+    def _on_update_downloaded(tag: str, path: str) -> None:
+        # Tray balloon fires only on a fresh download — already_present
+        # (file from a prior session) would otherwise spam this on every
+        # startup once the .exe is on disk. The user still sees
+        # "Restart to Update" in the tray menu either way.
+        tray = getattr(window, "_tray", None)
+        if tray is None or not tray.supportsMessages():
+            return
+        from pathlib import Path as _Path  # local import: rarely used
+        tray.showMessage(
+            f"Live Telemetry Evo {tag} downloaded",
+            f"{_Path(path).name} was saved next to the current app. "
+            "Open the tray menu and click \"Restart to Update\" "
+            "when you're ready.",
+            QSystemTrayIcon.MessageIcon.Information,
+            10_000,
+        )
+
+    # pylint: disable-next=no-member
+    window._updater.download_finished.connect(_on_update_downloaded)
+
+    # Kick off the auto-check at startup. The controller is non-blocking
+    # (worker thread) so telemetry detection / countdown / overlay
+    # rendering proceed while the request is in flight.
+    window._updater.start_check()
 
     # Hide the telemetry widgets during the countdown — they reveal when
     # the countdown finishes (subject to the persisted visibility flag).

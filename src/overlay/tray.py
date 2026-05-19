@@ -6,6 +6,18 @@ from PySide6.QtGui import QAction, QActionGroup, QCursor, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidget
 
 from .resources import app_icon_path
+from .updater import UpdateController
+
+
+# Labels for each UpdateController state — the tray menu action's text
+# tracks these directly. Kept module-level so the constants are easy to
+# tweak without diving into the menu-construction code.
+_UPDATE_LABELS = {
+    UpdateController.IDLE: ("Check for Updates", True),
+    UpdateController.CHECKING: ("Checking updates...", False),
+    UpdateController.DOWNLOADING: ("Downloading update...", False),
+    UpdateController.READY: ("Restart to Update", True),
+}
 
 
 def _with_shortcut(text: str, shortcut: str | None) -> str:
@@ -28,6 +40,7 @@ def make_tray(
     is_logging: Callable[[], bool],
     on_open_logs_folder: Callable[[], None],
     on_quit: Callable[[], None],
+    updater: UpdateController | None = None,
     reset_shortcut: str | None = None,
     click_through_shortcut: str | None = None,
     size_shortcut: str | None = None,
@@ -117,6 +130,35 @@ def make_tray(
     open_logs_action = QAction("Open logs folder", menu)
     open_logs_action.triggered.connect(lambda _checked: on_open_logs_folder())
     menu.addAction(open_logs_action)
+
+    update_action: QAction | None = None
+    if updater is not None:
+        menu.addSeparator()
+        text, enabled = _UPDATE_LABELS[updater.state]
+        update_action = QAction(text, menu)
+        update_action.setEnabled(enabled)
+
+        def _on_update_clicked() -> None:
+            # Dispatch by current state: from IDLE this kicks off a new
+            # check; from READY it relaunches into the downloaded .exe.
+            # CHECKING / DOWNLOADING render the action disabled so the
+            # click can't reach this branch.
+            if updater.state == UpdateController.READY:
+                updater.restart_into_update()
+            elif updater.state == UpdateController.IDLE:
+                updater.start_check()
+
+        update_action.triggered.connect(lambda _checked: _on_update_clicked())
+        menu.addAction(update_action)
+
+        def _on_update_state_changed(state: str, _detail: str) -> None:
+            label = _UPDATE_LABELS.get(state)
+            if label is None or update_action is None:
+                return
+            update_action.setText(label[0])
+            update_action.setEnabled(label[1])
+
+        updater.state_changed.connect(_on_update_state_changed)
 
     menu.addSeparator()
 

@@ -82,8 +82,11 @@ UNWANTED_BINARIES = (
     "Qt6Quick3D.dll", "Qt6QuickControls2.dll", "Qt6QuickWidgets.dll",
     # OpenGL widgets — unused.
     "Qt6OpenGL.dll", "Qt6OpenGLWidgets.dll",
-    # Networking + the OpenSSL pair it pulls in.
-    "Qt6Network.dll", "libcrypto-", "libssl-",
+    # QtNetwork only — Python's stdlib ssl module needs the
+    # ``libcrypto-*.dll`` / ``libssl-*.dll`` pair too (used by
+    # ``overlay.updater`` for HTTPS to the GitHub releases API), so
+    # those substrings are no longer in this filter.
+    "Qt6Network.dll",
     # PDF / SVG — both unused at runtime (fetch_icons.py uses QtSvg but
     # runs at build time outside the bundle).
     "Qt6Pdf.dll", "Qt6Svg.dll",
