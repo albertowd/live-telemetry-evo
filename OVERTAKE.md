@@ -2,7 +2,7 @@
 
 A transparent, always-on-top desktop overlay that displays live engine, driver-input, and per-wheel telemetry on top of [B]every Assetto Corsa title[/B] — the original [B]Assetto Corsa[/B], [B]Assetto Corsa Competizione[/B], [B]Assetto Corsa Evo[/B], and [B]Assetto Corsa Rally[/B]. The goal is not to replace the in-game apps, but to give you a single calibrated view of the data that actually matters when you are chasing balance and setup issues.
 
-[MEDIA=youtube]r5xZroHg2QY[/MEDIA]
+[MEDIA=youtube]djI9jMMFOLg[/MEDIA]
 
 The overlay reads the game's shared-memory blocks directly ([COLOR=rgb(44, 130, 201)]Local\acevo_pmf_*[/COLOR] on AC Evo, [COLOR=rgb(44, 130, 201)]Local\acpmf_*[/COLOR] on AC1 / ACC / AC Rally), auto-detects which game is running, and attaches as soon as the session publishes telemetry. It ships as a single Windows executable — no Python plugin, no Content Manager install, nothing inside the game folder.
 

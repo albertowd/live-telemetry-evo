@@ -2,7 +2,7 @@
 
 ## Live Telemetry Evo on AC Evo
 
-[![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/ac-evo.webp)](https://www.youtube.com/watch?v=r5xZroHg2QY)
+[![Overlay running on top of AC Evo](https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/ac-evo.webp)](https://youtu.be/djI9jMMFOLg)
 (click the image to view the Youtube vídeo)
 
 ## Live Telemetry Evo on AC Rally
