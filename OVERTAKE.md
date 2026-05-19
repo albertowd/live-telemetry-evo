@@ -166,11 +166,22 @@ Hotkeys are registered globally with Win32 [COLOR=rgb(44, 130, 201)]RegisterHotK
 [*][B]Ctrl+Alt+Q[/B] — quit the overlay.
 [/LIST]
 
-A system-tray icon mirrors the same options (reset positions, click-through toggle, size submenu, quit) with the hotkey shown next to each label, plus two new sections:
+A system-tray icon mirrors the same options (reset positions, click-through toggle, size submenu, quit) with the hotkey shown next to each label, plus three new sections:
 
 [LIST]
 [*][B]Polling Hz[/B] submenu — 30 / 60 / 100 / 120 / 144 / 250 Hz. Drives the shared-memory poll rate (and CSV row rate when logging is active). UI repaint runs independently at the monitor refresh rate, so faster polling never makes the widgets paint more often than your display can show. The choice is persisted.
 [*][B]Start logging[/B] / [B]Stop logging[/B] — toggles CSV capture of every telemetry frame (raw shared-memory values plus calculated ones) to a timestamped file next to the executable. A dedicated writer thread does the disk I/O so polling cadence stays exact. [B]Open logs folder[/B] opens the directory in Explorer.
+[*][B]Check for Updates[/B] — manual re-trigger of the GitHub-releases check (also fires automatically on launch). The label tracks state — [B]Check for Updates[/B] (idle) → [I]Checking updates...[/I] (disabled) → [I]Downloading update...[/I] (disabled) → [B]Restart to Update[/B] (clickable). [B]Restart to Update[/B] launches the freshly-downloaded executable detached and quits the current one. Failures revert to the idle label.
+[/LIST]
+
+[SIZE=5][B]Auto-update[/B][/SIZE]
+
+On launch the overlay asynchronously asks GitHub for the latest release. If a newer version is available, the matching [COLOR=rgb(44, 130, 201)]LiveTelemetryEvo-<version>.exe[/COLOR] is downloaded into the same folder as the running app and a system-tray notification appears. The tray menu entry flips to [B]Restart to Update[/B] so you can switch to the new version with a single click — it launches the new executable and quits the current one.
+
+[LIST]
+[*]Re-downloads are skipped — if the matching asset already exists next to the current app (e.g. you downloaded it last session but didn't restart), the menu jumps straight to [B]Restart to Update[/B].
+[*]Network errors are silent in the UI; the menu reverts to [B]Check for Updates[/B] so you can retry.
+[*]The old [COLOR=rgb(44, 130, 201)].exe[/COLOR] is left in place so you can always go back to a prior version by double-clicking it. Uninstalling is the same single-file delete it always was.
 [/LIST]
 
 When the overlay is unlocked (click-through OFF), drag any widget to move it, or click its [B]×[/B] to hide it. Both states persist across sessions. If you hide everything, [B]Ctrl+Alt+R[/B] brings the layout back.

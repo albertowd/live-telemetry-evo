@@ -200,9 +200,38 @@ it to open a menu mirroring the hotkeys above:
   telemetry frame (raw + calculated) to `logs/<timestamp>_<source>.csv`.
 - **Open logs folder** — opens the directory holding the CSV files
   alongside the executable.
+- **Check for Updates** — manual re-trigger of the GitHub-releases
+  check (also fires automatically on launch). The label tracks state:
+  `Check for Updates` (idle, clickable) → `Checking updates...`
+  (disabled) → `Downloading update...` (disabled) →
+  `Restart to Update` (clickable; launches the freshly downloaded
+  .exe and quits the current one). Failures revert to the idle label.
 - **Quit** — exits the overlay.
 
 Each menu entry that maps to a hotkey shows it alongside the label.
+
+### Auto-update
+
+On launch the overlay asynchronously queries
+`api.github.com/repos/albertowd/live-telemetry-evo/releases/latest`.
+If the tag is newer than the running version it downloads the matching
+`LiveTelemetryEvo-<version>.exe` asset into the folder next to the
+running executable, then surfaces a tray balloon — and flips the tray
+menu entry above to **Restart to Update**. The old `.exe` is left in
+place so you can revert by double-clicking it; uninstalling is the
+same single-file delete it always was.
+
+- Re-downloads are skipped — if the matching asset already exists on
+  disk (e.g. you downloaded it last session but didn't restart), the
+  menu jumps straight to **Restart to Update**.
+- The download writes to `<target>.partial` and atomic-renames on
+  success, so a crash mid-download never leaves a half-file under the
+  final name.
+- Network errors are silent in the UI (diagnostics go to stdout). The
+  menu falls back to **Check for Updates** so the user can retry.
+- The check uses Python's stdlib `urllib` over HTTPS — no QtNetwork
+  dependency, no extra runtime traffic beyond a single JSON GET plus
+  the asset download itself.
 
 ### CSV logging
 
@@ -475,8 +504,8 @@ list since the previous tag.
 # 1. Bump version in pyproject.toml.
 # 2. Add the new ## [X.Y.Z] section to CHANGELOG.md (Keep a Changelog format).
 # 3. Tag and push.
-git tag v0.6.5
-git push origin v0.6.5
+git tag v0.6.6
+git push origin v0.6.6
 ```
 
 The release page populates a couple of minutes later — no manual upload
@@ -511,7 +540,8 @@ src/overlay/
 ├── __main__.py                # `python -m overlay` entry point
 ├── app.py                     # CLI parsing, layout + size cycling, threads the source
 ├── window.py                  # frameless / translucent / always-on-top window + Win32 hotkeys
-├── tray.py                    # system-tray icon + context menu (reset / click-through / size / Hz / logging / quit)
+├── tray.py                    # system-tray icon + context menu (reset / click-through / size / Hz / logging / update / quit)
+├── updater.py                 # async GitHub-releases check + state-machine controller (idle / checking / downloading / restart)
 ├── layout.py                  # screen-size → multiplier and corner placements
 ├── settings.py                # JSON-backed positions / visibility / size / polling-Hz persistence
 ├── paths.py                   # always-local config + logs folder resolution

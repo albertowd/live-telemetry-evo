@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-05-19
+
+### Added
+- Auto-update on launch: hits GitHub releases API, downloads the new `LiveTelemetryEvo-<version>.exe` next to the app; skips already-downloaded files.
+- Streams via a `.partial` sibling + atomic rename so a crash mid-download never leaves a half-file under the final name.
+- Tray entry **Check for Updates** — 4 states: idle → `Checking...` → `Downloading...` → **Restart to Update** (launches new .exe, quits).
+- Tray balloon notification when a fresh download completes; silent on already-on-disk / up-to-date / offline paths.
+- New `overlay.updater` module — `UpdateChecker` worker + `UpdateController` (state machine + Qt signals the tray menu subscribes to).
+
+### Changed
+- PyInstaller spec keeps Python's stdlib SSL DLLs (`libcrypto-*` / `libssl-*`) for `urllib` HTTPS; `Qt6Network.dll` + TLS plugins stay excluded.
+
 ## [0.6.5] - 2026-05-18
 
 ### Added
@@ -93,7 +105,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
-[Unreleased]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.0...v0.6.5
 [0.6.0]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/albertowd/live-telemetry-ac-evo/releases/tag/v0.5.0
