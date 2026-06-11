@@ -2,9 +2,11 @@
 
 On startup the app queries
 ``https://api.github.com/repos/albertowd/live-telemetry-evo/releases/latest``
-and, if the tag is newer than the running version, downloads the
-matching ``LiveTelemetryEvo-<version>.exe`` asset into the same folder
-as the running executable. The user sees a system-tray balloon when
+(falling back to the ``github.com`` releases page, which serves the same
+tag as JSON, on networks where the API host is unreachable) and, if the
+tag is newer than the running version, downloads the matching
+``LiveTelemetryEvo-<version>.exe`` asset into the same folder as the
+running executable. The user sees a system-tray balloon when
 the download finishes; failures are silent.
 
 Re-downloads are skipped — if a file with the asset's filename already
@@ -34,6 +36,18 @@ from PySide6.QtWidgets import QApplication
 
 GITHUB_API_LATEST = (
     "https://api.github.com/repos/albertowd/live-telemetry-evo/releases/latest"
+)
+# Fallback when ``api.github.com`` is unreachable but ``github.com`` works
+# (some networks resolve/filter the two hosts differently). The releases
+# page returns ``{"tag_name": ...}`` when asked for JSON; the asset URL is
+# then rebuilt from the release naming convention since the page JSON
+# carries no asset list.
+GITHUB_WEB_LATEST = (
+    "https://github.com/albertowd/live-telemetry-evo/releases/latest"
+)
+GITHUB_DOWNLOAD_URL = (
+    "https://github.com/albertowd/live-telemetry-evo/releases/download/"
+    "{tag}/LiveTelemetryEvo-{version}.exe"
 )
 HTTP_TIMEOUT_S = 10
 USER_AGENT = "live-telemetry-evo-updater"
@@ -157,10 +171,30 @@ class UpdateChecker(QObject):
 
     @staticmethod
     def _fetch_latest() -> dict:
+        try:
+            return UpdateChecker._fetch_json(
+                GITHUB_API_LATEST, "application/vnd.github+json")
+        except (urllib.error.URLError, TimeoutError, OSError):
+            print("[updater] api.github.com unreachable; "
+                  "falling back to github.com")
+        payload = UpdateChecker._fetch_json(
+            GITHUB_WEB_LATEST, "application/json")
+        tag = (payload.get("tag_name") or "").strip()
+        version = tag.lstrip("vV")
+        if version:
+            payload.setdefault("assets", [{
+                "name": f"LiveTelemetryEvo-{version}.exe",
+                "browser_download_url": GITHUB_DOWNLOAD_URL.format(
+                    tag=tag, version=version),
+            }])
+        return payload
+
+    @staticmethod
+    def _fetch_json(url: str, accept: str) -> dict:
         req = urllib.request.Request(
-            GITHUB_API_LATEST,
+            url,
             headers={
-                "Accept": "application/vnd.github+json",
+                "Accept": accept,
                 "User-Agent": USER_AGENT,
             },
         )
