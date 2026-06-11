@@ -144,6 +144,20 @@ def acpmf_tag_present() -> bool:
     return _tag_exists("Local\\acpmf_static")
 
 
+def is_process_running(names: tuple[str, ...]) -> bool:
+    """Return True if any process whose EXE basename matches one of
+    ``names`` (case-insensitive, substring match) is currently running.
+
+    Thin public wrapper around the toolhelp snapshot used for game
+    detection so other subsystems (e.g. ``overlay.vr.detect``) can probe
+    for a process — like SteamVR's ``vrserver.exe`` — without duplicating
+    the Win32 plumbing. Returns False on non-Windows or if the snapshot
+    fails (callers must treat that as "unknown", not "definitely off").
+    """
+    procs = _running_processes()
+    return any(any(n in p for n in names) for p in procs)
+
+
 def _running_processes() -> list[str]:
     """Return lower-cased EXE basenames of every process currently running.
 
@@ -221,4 +235,4 @@ def detect_running_game() -> str | None:  # pylint: disable=too-many-return-stat
     return None
 
 
-__all__ = ["detect_running_game"]
+__all__ = ["detect_running_game", "acpmf_tag_present", "is_process_running"]

@@ -36,6 +36,8 @@ def make_tray(
     on_set_polling_hz: Callable[[int], None],
     current_polling_hz: Callable[[], int],
     polling_hz_options: Sequence[int],
+    on_set_vr_placement: Callable[[str], None],
+    current_vr_placement: Callable[[], str],
     on_toggle_logging: Callable[[], None],
     is_logging: Callable[[], bool],
     on_open_logs_folder: Callable[[], None],
@@ -119,6 +121,27 @@ def make_tray(
         a.triggered.connect(lambda _checked, h=hz: on_set_polling_hz(h))
         hz_actions.append((hz, a))
 
+    # VR placement submenu: where the HUD quad floats in the headset when
+    # the overlay is running in VR. Head-locked follows the gaze; fixed
+    # freezes the quad in the play space right where it currently floats
+    # (re-selecting it re-anchors at the current gaze). Inert when the
+    # overlay isn't in VR — the choice is just persisted for next time.
+    vr_menu = menu.addMenu("VR placement")
+    vr_group = QActionGroup(vr_menu)
+    vr_group.setExclusive(True)
+    # (internal mode, human label) — mode strings match VROverlayOutput;
+    # "dash" is kept as the persisted key for the fixed mode for backward
+    # compatibility with existing settings files.
+    _vr_modes = (("head", "Head-locked"), ("dash", "Fixed in place"))
+    vr_actions: list[tuple[str, QAction]] = []
+    for mode, label in _vr_modes:
+        a = QAction(label, vr_menu)
+        a.setCheckable(True)
+        vr_group.addAction(a)
+        vr_menu.addAction(a)
+        a.triggered.connect(lambda _checked, m=mode: on_set_vr_placement(m))
+        vr_actions.append((mode, a))
+
     menu.addSeparator()
 
     # CSV logging — single toggle action whose text flips between
@@ -174,6 +197,9 @@ def make_tray(
         cur_hz = current_polling_hz()
         for hz, a in hz_actions:
             a.setChecked(hz == cur_hz)
+        cur_vr = current_vr_placement()
+        for mode, a in vr_actions:
+            a.setChecked(mode == cur_vr)
         logging_action.setText(
             _with_shortcut(
                 "Stop logging" if is_logging() else "Start logging",

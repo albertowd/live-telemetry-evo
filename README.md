@@ -74,6 +74,8 @@ python -m overlay --source ac1         # force original Assetto Corsa
 python -m overlay --source synthetic   # animated mock data, no game required
 python -m overlay --hz 120             # one-shot override; 0 (default) uses the
                                        # persisted tray choice (default 60)
+python -m overlay --vr                 # force the VR overlay on (SteamVR)
+python -m overlay --novr               # force VR off (pure desktop overlay)
 ```
 
 The polling rate is **persisted across sessions** (`30 / 60 / 100 / 120 / 144 /
@@ -93,6 +95,42 @@ their reader immediately.
 tag names (`Local\acpmf_*`) — only one of those games can run at a time
 anyway, and the `--source` flag tells the overlay which struct layout to
 apply. Attaching with the wrong layout reads garbage values.
+
+### VR (SteamVR / OpenVR)
+
+A plain always-on-top desktop window is invisible inside a headset — the VR
+compositor draws the game straight to the HMD and ignores desktop windows. So
+in VR the overlay submits the composited HUD to the **SteamVR (OpenVR)
+compositor** as a single flat overlay quad. One backend covers every PCVR
+headset that runs through SteamVR: a **Pimax** (PiTool → SteamVR) and a **Meta
+Quest 3** (Link / Air Link / Steam Link / Virtual Desktop → SteamVR) look
+identical from here. The game still runs on the PC — this is PCVR, not the
+Quest's standalone mode.
+
+VR mode is resolved from the CLI flags, defaulting to auto-detect:
+
+| Invocation      | Behaviour                                                              |
+|-----------------|-----------------------------------------------------------------------|
+| *(none)*        | **Auto** — poll for a running SteamVR runtime + connected HMD and turn the VR overlay on automatically when both are present. |
+| `--vr`          | Force VR on now. Falls back to the desktop overlay (with a log line) if SteamVR / the OpenVR runtime isn't available. |
+| `--novr`        | Force VR off, disabling auto-detection — pure desktop overlay.         |
+
+The HUD quad's placement is chosen from the **VR placement** tray submenu and
+persisted across sessions:
+
+- **Head-locked** (default) — the panel follows your gaze, fixed in front of
+  the eyes. Never jitters and is always visible; the safe choice across
+  headsets.
+- **Fixed in place** — the panel freezes in the play space exactly where it
+  floats at the moment you select the mode: look where you want it, click the
+  entry, and it stays there. Re-selecting it re-anchors at your current gaze.
+  More immersive, but OpenVR world-locking can jitter on some streamed-link
+  setups (notably Quest).
+
+Switching placement updates the live overlay without a restart. The OpenVR
+binding (`openvr` / pyopenvr) ships inside the released `.exe`; the import is
+guarded, so machines without it or without SteamVR simply run the desktop
+overlay as before.
 
 ### Per-game support matrix
 
@@ -196,6 +234,10 @@ it to open a menu mirroring the hotkeys above:
 - **Size** — submenu with `XS / S / M / L / XL` as a radio group.
 - **Polling Hz** — submenu with `30 / 60 / 100 / 120 / 144 / 250` Hz as a
   radio group; controls the shared-memory poll rate and the CSV row rate.
+- **VR placement** — submenu (`Head-locked` / `Fixed in place` radio group)
+  for where the HUD quad floats in the headset when running in VR. Persists;
+  updates the live overlay without a restart (inert when not in VR).
+  Re-selecting *Fixed in place* re-anchors the panel at your current gaze.
 - **Start logging / Stop logging** — toggles CSV capture of every
   telemetry frame (raw + calculated) to `logs/<timestamp>_<source>.csv`.
 - **Open logs folder** — opens the directory holding the CSV files
@@ -562,6 +604,9 @@ src/overlay/
 │   ├── acrally.py             # Assetto Corsa Rally shared-memory reader
 │   ├── _win32_mapping.py      # NamedMapping (OpenFileMappingW) shared by all live readers
 │   └── dump.py                # `python -m overlay.sources.dump` for SHM debugging
+├── vr/
+│   ├── detect.py              # SteamVR-running + HMD-present probes (auto-enable signal)
+│   └── overlay_output.py      # VROverlayOutput — OpenVR overlay quad: lifecycle, placement, RGBA submit
 └── widgets/
     ├── countdown.py           # post-detection countdown — shows detected game name + digit
     ├── detection.py           # full-screen "Detecting AC Environment..." poller
@@ -586,6 +631,11 @@ the live AC Evo reader (or any future source) does not touch any UI code.
 - **Click-through default is ON.** This is deliberate — a full-screen overlay must
   not steal mouse input from the game. Toggle it off with `Ctrl+Alt+L` before trying
   to drag a widget.
+- **VR quad geometry is tunable.** The panel size and head-locked offset live in
+  labelled constants at the top of `src/overlay/vr/overlay_output.py` (`WIDTH_M`,
+  `HEAD_DISTANCE_M`, `HEAD_DOWN_M`) — the first things to adjust if the panel feels
+  too large or too close in a given headset. *Fixed in place* uses the same offset
+  relative to where you're looking when the mode is selected.
 
 ---
 

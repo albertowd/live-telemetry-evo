@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_dynamic_libs
+
 
 # When PyInstaller runs us, ``__file__`` isn't defined on every Python
 # version, but the spec is always invoked from the project root with
@@ -122,12 +124,19 @@ if ICON_PNG.exists():
     DATAS.append((str(ICON_PNG), "resources"))
 
 
+# pyopenvr's native lib (openvr_api.dll) ships inside the package. The
+# overlay imports ``openvr`` lazily inside a try/except, so PyInstaller's
+# static analysis won't pull it in on its own — list it as a hidden import
+# and collect its DLL explicitly so VR works in the bundled .exe.
+OPENVR_BINARIES = collect_dynamic_libs("openvr")
+
+
 a = Analysis(
     [str(ENTRYPOINT)],
     pathex=[str(ROOT / "src")],
-    binaries=[],
+    binaries=OPENVR_BINARIES,
     datas=DATAS,
-    hiddenimports=[],
+    hiddenimports=["openvr"],
     hookspath=[],
     runtime_hooks=[],
     excludes=EXCLUDED_MODULES,

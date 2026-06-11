@@ -135,3 +135,18 @@ def save_polling_hz(hz: int) -> None:
     data = _read()
     data["polling_hz"] = int(hz)
     _write(data)
+
+
+def load_vr_placement(default: str = "head", allowed: tuple[str, ...] = ("head", "dash")) -> str:
+    """Return the persisted VR overlay placement (``"head"`` / ``"dash"``),
+    falling back to ``default`` for a missing or unrecognised entry."""
+    val = _read().get("vr_placement")
+    if isinstance(val, str) and val in allowed:
+        return val
+    return default
+
+
+def save_vr_placement(mode: str) -> None:
+    data = _read()
+    data["vr_placement"] = str(mode)
+    _write(data)

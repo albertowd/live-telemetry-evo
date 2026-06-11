@@ -11,12 +11,15 @@ from .frame_bus import FrameBus
 from .layout import ScreenLayout, compute_layout, pick_resolution
 from .logger import CsvLogger
 from .settings import (delete_entries, load_polling_hz, load_positions,
-                        load_size_index, load_visibility, save_polling_hz,
-                        save_position, save_size_index, save_visibility)
+                        load_size_index, load_visibility, load_vr_placement,
+                        save_polling_hz, save_position, save_size_index,
+                        save_visibility, save_vr_placement)
 from .sources import make_source
 from .telemetry import TelemetryFrame
 from .tray import make_tray
 from .updater import UpdateController
+from .vr import detect as vr_detect
+from .vr.overlay_output import VROverlayOutput
 from .widgets.countdown import CountdownView
 from .widgets.detection import DetectionView
 from .widgets.engine_view import EngineView
@@ -219,6 +222,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                         help=("polling rate in Hz; 0 = use the value persisted in "
                               "settings (default 60). Allowed live values: "
                               "30/60/100/120/144/250."))
+    vr_group = parser.add_mutually_exclusive_group()
+    vr_group.add_argument(
+        "--vr", action="store_true",
+        help=("force the VR overlay on: submit the HUD to SteamVR as an "
+              "overlay quad. Falls back to the desktop overlay if SteamVR / "
+              "the OpenVR runtime isn't available."))
+    vr_group.add_argument(
+        "--novr", action="store_true",
+        help=("force the VR overlay off, disabling SteamVR auto-detection "
+              "(pure desktop overlay). Default is to auto-detect SteamVR and "
+              "enable VR when a headset is present."))
     return parser.parse_args(argv)
 
 
@@ -327,6 +341,17 @@ def run(argv: list[str] | None = None) -> int:
     window.size_hotkey.connect(_cycle_size)
     window.log_hotkey.connect(_toggle_logging)
 
+    # --- VR output: SteamVR overlay quad mirroring the HUD ------------
+    # The overlay window's widgets are submitted to the OpenVR compositor
+    # so they appear inside the headset (a desktop window is invisible in
+    # VR). Started later per --vr / --novr / auto-detect; placement is
+    # persisted and switchable from the tray submenu below.
+    vr = VROverlayOutput(placement=load_vr_placement())
+
+    def _set_vr_placement(mode: str) -> None:
+        save_vr_placement(mode)
+        vr.set_placement(mode)
+
     # System-tray icon: reset / click-through / size submenu /
     # polling Hz submenu / quit. Held by ``window`` so it lives as long
     # as the overlay does.
@@ -346,6 +371,8 @@ def run(argv: list[str] | None = None) -> int:
         on_set_polling_hz=_set_polling_hz,
         current_polling_hz=lambda: polling_hz,
         polling_hz_options=POLLING_HZ_OPTIONS,
+        on_set_vr_placement=_set_vr_placement,
+        current_vr_placement=lambda: vr.placement,
         on_toggle_logging=_toggle_logging,
         is_logging=logger.is_active,
         on_open_logs_folder=_open_logs_folder,
@@ -424,16 +451,23 @@ def run(argv: list[str] | None = None) -> int:
         # only tick on the thread they were started from.
         # pylint: disable-next=no-member
         thread.started.connect(source.start)
-        # Clean shutdown when the app quits: stop the timer + close SHM
-        # mappings on the worker thread, then quit the thread loop. The
-        # CSV writer is joined first so its final flush doesn't race the
-        # bus being torn down.
+        # Clean shutdown when the app quits. The CSV writer is joined
+        # first so its final flush doesn't race the bus teardown. Then
+        # ``stop_requested`` (blocking queued) runs ``source.stop()`` on
+        # the worker thread before the loop is quit and joined — quitting
+        # first could drop the queued stop, leaving the polling QTimer
+        # alive to be destroyed cross-thread at interpreter teardown
+        # ("QObject::killTimer: Timers cannot be stopped from another
+        # thread").
+        def _shutdown() -> None:
+            logger.stop()
+            if thread.isRunning():
+                source.stop_requested.emit()
+                thread.quit()
+                thread.wait(2000)
+
         # pylint: disable-next=no-member
-        app.aboutToQuit.connect(logger.stop)
-        # pylint: disable-next=no-member
-        app.aboutToQuit.connect(source.stop)
-        # pylint: disable-next=no-member
-        app.aboutToQuit.connect(thread.quit)
+        app.aboutToQuit.connect(_shutdown)
         thread.start()
         # Keep references on the window so the QObjects aren't GC'd when
         # this closure returns.
@@ -466,6 +500,79 @@ def run(argv: list[str] | None = None) -> int:
         detection.start()
     else:
         _start_source(args.source)
+
+    # --- VR enable/teardown wiring ------------------------------------
+    # Frame submit runs on its own timer (~45 Hz) rather than per repaint:
+    # grabbing the widgets every paint is wasteful and the compositor
+    # reprojects between submits anyway. Only ticks while a VR overlay is
+    # actually live. Each visible widget is grabbed and submitted on its own
+    # small overlay (see VROverlayOutput) — far cheaper and more reliable
+    # than one full-desktop frame.
+    vr_submit_timer = QTimer(window)
+    vr_submit_timer.setInterval(int(1000 / 45))
+
+    def _vr_submit() -> None:
+        if not vr.is_running():
+            return
+        items = []
+        for key, view in (("engine", engine), ("inputs", inputs), *wheels.items()):
+            if not view.isVisible():
+                continue
+            g = view.geometry()
+            items.append((key, view.grab().toImage(),
+                          g.x(), g.y(), g.width(), g.height()))
+        vr.submit_widgets(items, layout.screen_w, layout.screen_h)
+
+    # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
+    vr_submit_timer.timeout.connect(_vr_submit)
+    # pylint: disable-next=no-member
+    app.aboutToQuit.connect(vr.stop)
+
+    def _enable_vr() -> bool:
+        if vr.start():
+            vr_submit_timer.start()
+            # VR is live: the HUD is rendered inside the headset, so blank the
+            # desktop overlay entirely — a duplicate copy floating on the
+            # monitor is just clutter. Full window transparency (rather than
+            # hiding the widgets) keeps each widget rendering, so ``_vr_submit``
+            # can still ``grab()`` real pixels and ``isVisible()`` stays True.
+            window.setWindowOpacity(0.0)
+            return True
+        return False
+
+    # Resolve mode: --novr off, --vr force, neither = auto-detect.
+    if args.novr:
+        vr_mode = "off"
+    elif args.vr:
+        vr_mode = "force"
+    else:
+        vr_mode = "auto"
+
+    if vr_mode == "force":
+        if not _enable_vr():
+            print("[overlay] VR requested but unavailable; "
+                  "staying on desktop overlay")
+    elif vr_mode == "auto" and VROverlayOutput.available():
+        # Poll for a live SteamVR session; flip into VR on first detection,
+        # then stop polling. Mirrors DetectionView's poll-and-start idiom.
+        vr_detect_timer = QTimer(window)
+        vr_detect_timer.setInterval(2000)
+
+        def _vr_detect_tick() -> None:
+            if vr_detect.vr_active():
+                vr_detect_timer.stop()
+                if _enable_vr():
+                    print("[overlay] SteamVR detected; VR overlay enabled")
+
+        # pylint: disable-next=no-member
+        vr_detect_timer.timeout.connect(_vr_detect_tick)
+        vr_detect_timer.start()
+        window._vr_detect_timer = vr_detect_timer
+
+    # Keep references on the window so the QObjects survive past run()'s scope.
+    window._vr = vr
+    window._vr_submit_timer = vr_submit_timer
+
     return app.exec()
 
 

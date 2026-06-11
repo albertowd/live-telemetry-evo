@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- VR output: the HUD is submitted to the **SteamVR / OpenVR** compositor as a flat overlay quad — one backend for every PCVR headset.
+- `--vr` forces VR on, `--novr` forces it off; default auto-detects a running SteamVR runtime + connected HMD and enables VR on its own.
+- Tray submenu **VR placement** — **Head-locked** (default) or **Fixed in place**; persisted and applied to the live overlay without a restart.
+- **Fixed in place** freezes the quad where it floats at activation; re-selecting it re-anchors at the current gaze.
+- New `overlay.vr` package — `detect` (SteamVR/HMD probes) + `VROverlayOutput` (lifecycle, placement, submit, event pump); import-guarded.
+- Frames stream as a persistent OpenGL texture (V bounds flipped to render right-side-up); raw-RGBA fallback when GL init fails.
+- Frame submit runs on a dedicated ~45 Hz timer; visible widgets are composited at their screen positions onto a constant-size canvas.
+- Desktop overlay is blanked while VR is live (no duplicate copy on the monitor); widgets keep rendering so the headset still receives them.
+
+### Changed
+- `openvr` (pyopenvr) is now a runtime dependency, bundled into the released `.exe` (hidden import + `openvr_api.dll` collected).
+
+### Fixed
+- Shutdown stops the telemetry source on its worker thread before quitting and joining it, fixing "Timers cannot be stopped from another thread" at exit.
+- Update check falls back to `github.com` when `api.github.com` is unreachable; the asset URL is rebuilt from the release naming convention.
+
 ## [0.6.6] - 2026-05-19
 
 ### Added
@@ -14,9 +31,6 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray entry **Check for Updates** — 4 states: idle → `Checking...` → `Downloading...` → **Restart to Update** (launches new .exe, quits).
 - Tray balloon notification when a fresh download completes; silent on already-on-disk / up-to-date / offline paths.
 - New `overlay.updater` module — `UpdateChecker` worker + `UpdateController` (state machine + Qt signals the tray menu subscribes to).
-
-### Changed
-- PyInstaller spec keeps Python's stdlib SSL DLLs (`libcrypto-*` / `libssl-*`) for `urllib` HTTPS; `Qt6Network.dll` + TLS plugins stay excluded.
 
 ## [0.6.5] - 2026-05-18
 
