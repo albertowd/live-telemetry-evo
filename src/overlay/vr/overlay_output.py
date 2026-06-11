@@ -167,6 +167,21 @@ class VROverlayOutput:
         """Current placement mode (``"head"`` / ``"dash"``)."""
         return self._placement
 
+    def display_hz(self) -> float:
+        """The HMD's display refresh rate in Hz (e.g. 90.0 / 120.0), or
+        ``0.0`` when not running or the runtime doesn't report it — the
+        caller picks its own fallback."""
+        if self._system is None:
+            return 0.0
+        try:
+            hz = self._system.getFloatTrackedDeviceProperty(
+                openvr.k_unTrackedDeviceIndex_Hmd,
+                openvr.Prop_DisplayFrequency_Float,
+            )
+            return float(hz) if hz and hz > 0 else 0.0
+        except Exception:  # pylint: disable=broad-except
+            return 0.0
+
     # --- lifecycle --------------------------------------------------------
     def start(self) -> bool:
         """Init OpenVR as an overlay app and create + show the quad.

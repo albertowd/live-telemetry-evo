@@ -502,13 +502,14 @@ def run(argv: list[str] | None = None) -> int:
         _start_source(args.source)
 
     # --- VR enable/teardown wiring ------------------------------------
-    # Frame submit runs on its own timer (~45 Hz) rather than per repaint:
-    # grabbing the widgets every paint is wasteful and the compositor
-    # reprojects between submits anyway. Only ticks while a VR overlay is
-    # actually live. Each visible widget is grabbed and submitted on its own
-    # small overlay (see VROverlayOutput) — far cheaper and more reliable
-    # than one full-desktop frame.
+    # Frame submit runs on its own timer, re-armed to the HMD's display
+    # refresh rate when VR enables (45 Hz placeholder until then). Only
+    # ticks while a VR overlay is actually live. Each visible widget is
+    # grabbed and composited onto one canvas per tick (see
+    # VROverlayOutput). Precise timer type — a coarse timer's 5 %
+    # batching on Windows would cap a ~11 ms interval near 60 Hz.
     vr_submit_timer = QTimer(window)
+    vr_submit_timer.setTimerType(Qt.TimerType.PreciseTimer)
     vr_submit_timer.setInterval(int(1000 / 45))
 
     def _vr_submit() -> None:
@@ -529,16 +530,29 @@ def run(argv: list[str] | None = None) -> int:
     app.aboutToQuit.connect(vr.stop)
 
     def _enable_vr() -> bool:
-        if vr.start():
-            vr_submit_timer.start()
-            # VR is live: the HUD is rendered inside the headset, so blank the
-            # desktop overlay entirely — a duplicate copy floating on the
-            # monitor is just clutter. Full window transparency (rather than
-            # hiding the widgets) keeps each widget rendering, so ``_vr_submit``
-            # can still ``grab()`` real pixels and ``isVisible()`` stays True.
-            window.setWindowOpacity(0.0)
-            return True
-        return False
+        if not vr.start():
+            return False
+        # Pace submit AND repaint at the headset's display rate (fall
+        # back to the desktop refresh rate when the runtime doesn't
+        # report one). The desktop overlay is invisible while VR is live,
+        # so repaint no longer needs to track the monitor.
+        hmd_hz = vr.display_hz() or refresh_hz
+        vr_submit_timer.setInterval(max(1, round(1000 / hmd_hz)))
+        repaint_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        repaint_timer.setInterval(max(1, round(1000 / hmd_hz)))
+        print(f"[overlay] VR refresh: {hmd_hz:.0f} Hz")
+        # Hide the × buttons — the grab would bake them into the headset
+        # quad, and there is no pointer in VR to click them.
+        for view in (engine, inputs, *wheels.values()):
+            view.set_close_visible(False)
+        vr_submit_timer.start()
+        # VR is live: the HUD is rendered inside the headset, so blank the
+        # desktop overlay entirely — a duplicate copy floating on the
+        # monitor is just clutter. Full window transparency (rather than
+        # hiding the widgets) keeps each widget rendering, so ``_vr_submit``
+        # can still ``grab()`` real pixels and ``isVisible()`` stays True.
+        window.setWindowOpacity(0.0)
+        return True
 
     # Resolve mode: --novr off, --vr force, neither = auto-detect.
     if args.novr:
