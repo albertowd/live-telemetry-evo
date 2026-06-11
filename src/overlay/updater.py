@@ -1,10 +1,9 @@
 """Async update check against GitHub releases.
 
 On startup the app queries
-``https://api.github.com/repos/albertowd/live-telemetry-evo/releases/latest``
-(falling back to the ``github.com`` releases page, which serves the same
-tag as JSON, on networks where the API host is unreachable) and, if the
-tag is newer than the running version, downloads the matching
+``https://github.com/albertowd/live-telemetry-evo/releases/latest`` (the
+releases page serves the latest tag as JSON) and, if the tag is newer
+than the running version, downloads the matching
 ``LiveTelemetryEvo-<version>.exe`` asset into the same folder as the
 running executable. The user sees a system-tray balloon when
 the download finishes; failures are silent.
@@ -34,21 +33,13 @@ from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import QApplication
 
 
-GITHUB_API_LATEST = (
-    "https://api.github.com/repos/albertowd/live-telemetry-evo/releases/latest"
-)
-# Fallback when ``api.github.com`` is unreachable but ``github.com`` works
-# (some networks resolve/filter the two hosts differently). The releases
-# page returns ``{"tag_name": ...}`` when asked for JSON; the asset URL is
-# then rebuilt from the release naming convention since the page JSON
+# The check deliberately avoids ``api.github.com`` — it's unreachable on
+# some networks where ``github.com`` itself works (DNS interception /
+# filtering). ``<releases>/latest`` returns ``{"tag_name": ...}`` when
+# asked for JSON; the asset URL (``<releases>/download/<tag>/<asset>``)
+# is rebuilt from the release naming convention since the page JSON
 # carries no asset list.
-GITHUB_WEB_LATEST = (
-    "https://github.com/albertowd/live-telemetry-evo/releases/latest"
-)
-GITHUB_DOWNLOAD_URL = (
-    "https://github.com/albertowd/live-telemetry-evo/releases/download/"
-    "{tag}/LiveTelemetryEvo-{version}.exe"
-)
+GITHUB_RELEASES_URL = "https://github.com/albertowd/live-telemetry-evo/releases"
 HTTP_TIMEOUT_S = 10
 USER_AGENT = "live-telemetry-evo-updater"
 
@@ -171,30 +162,24 @@ class UpdateChecker(QObject):
 
     @staticmethod
     def _fetch_latest() -> dict:
-        try:
-            return UpdateChecker._fetch_json(
-                GITHUB_API_LATEST, "application/vnd.github+json")
-        except (urllib.error.URLError, TimeoutError, OSError):
-            print("[updater] api.github.com unreachable; "
-                  "falling back to github.com")
-        payload = UpdateChecker._fetch_json(
-            GITHUB_WEB_LATEST, "application/json")
+        payload = UpdateChecker._fetch_json(f"{GITHUB_RELEASES_URL}/latest")
         tag = (payload.get("tag_name") or "").strip()
         version = tag.lstrip("vV")
         if version:
+            name = f"LiveTelemetryEvo-{version}.exe"
             payload.setdefault("assets", [{
-                "name": f"LiveTelemetryEvo-{version}.exe",
-                "browser_download_url": GITHUB_DOWNLOAD_URL.format(
-                    tag=tag, version=version),
+                "name": name,
+                "browser_download_url":
+                    f"{GITHUB_RELEASES_URL}/download/{tag}/{name}",
             }])
         return payload
 
     @staticmethod
-    def _fetch_json(url: str, accept: str) -> dict:
+    def _fetch_json(url: str) -> dict:
         req = urllib.request.Request(
             url,
             headers={
-                "Accept": accept,
+                "Accept": "application/json",
                 "User-Agent": USER_AGENT,
             },
         )

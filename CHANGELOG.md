@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] - 2026-06-11
 
 ### Added
 - VR output: the HUD is submitted to the **SteamVR / OpenVR** compositor as a flat overlay quad — one backend for every PCVR headset.
@@ -13,15 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **Fixed in place** freezes the quad where it floats at activation; re-selecting it re-anchors at the current gaze.
 - New `overlay.vr` package — `detect` (SteamVR/HMD probes) + `VROverlayOutput` (lifecycle, placement, submit, event pump); import-guarded.
 - Frames stream as a persistent OpenGL texture (V bounds flipped to render right-side-up); raw-RGBA fallback when GL init fails.
-- Frame submit runs on a dedicated ~45 Hz timer; visible widgets are composited at their screen positions onto a constant-size canvas.
+- Frame submit and widget repaint pace at the HMD's display refresh rate; visible widgets are composited onto a constant-size canvas.
 - Desktop overlay is blanked while VR is live (no duplicate copy on the monitor); widgets keep rendering so the headset still receives them.
-
-### Changed
-- `openvr` (pyopenvr) is now a runtime dependency, bundled into the released `.exe` (hidden import + `openvr_api.dll` collected).
+- Widget `×` close buttons are hidden while VR is live — the grab would bake them into the headset quad with no pointer to click them.
 
 ### Fixed
-- Shutdown stops the telemetry source on its worker thread before quitting and joining it, fixing "Timers cannot be stopped from another thread" at exit.
-- Update check falls back to `github.com` when `api.github.com` is unreachable; the asset URL is rebuilt from the release naming convention.
+- Update check queries `github.com` instead of `api.github.com` (unreachable on some networks); asset URL rebuilt from the release name.
 
 ## [0.6.6] - 2026-05-19
 
@@ -119,7 +116,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
-[Unreleased]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.6...HEAD
+[0.7.0]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.0...v0.6.5
 [0.6.0]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.5.0...v0.6.0

@@ -255,7 +255,9 @@ Each menu entry that maps to a hotkey shows it alongside the label.
 ### Auto-update
 
 On launch the overlay asynchronously queries
-`api.github.com/repos/albertowd/live-telemetry-evo/releases/latest`.
+`github.com/albertowd/live-telemetry-evo/releases/latest` (which serves
+the latest tag as JSON — `api.github.com` is deliberately avoided since
+some networks block it).
 If the tag is newer than the running version it downloads the matching
 `LiveTelemetryEvo-<version>.exe` asset into the folder next to the
 running executable, then surfaces a tray balloon — and flips the tray
