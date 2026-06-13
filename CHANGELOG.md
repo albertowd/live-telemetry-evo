@@ -12,8 +12,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray submenu **VR placement** — **Head-locked** (default) or **Fixed in place**; persisted and applied to the live overlay without a restart.
 - **Fixed in place** freezes the quad where it floats at activation; re-selecting it re-anchors at the current gaze.
 - New `overlay.vr` package — `detect` (SteamVR/HMD probes) + `VROverlayOutput` (lifecycle, placement, submit, event pump); import-guarded.
-- Frames stream as a persistent OpenGL texture (V bounds flipped to render right-side-up); raw-RGBA fallback when GL init fails.
-- Frame submit and widget repaint pace at the HMD's display refresh rate; visible widgets are composited onto a constant-size canvas.
+- Frames stream into a persistent OpenGL texture ring (V bounds flipped to render right-side-up); raw-RGBA fallback when GL init fails.
+- One VR tick dispatches telemetry, grabs, composites, and submits at the HMD refresh rate; steps down when the tick cost can't sustain it.
 - Desktop overlay is blanked while VR is live (no duplicate copy on the monitor); widgets keep rendering so the headset still receives them.
 - Widget `×` close buttons are hidden while VR is live — the grab would bake them into the headset quad with no pointer to click them.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 
 from PySide6.QtCore import QThread, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
@@ -473,8 +474,11 @@ def run(argv: list[str] | None = None) -> int:
         # this closure returns.
         window._source = source
         window._source_thread = thread
-        # Now that frames will start flowing, kick the UI-side paint loop.
-        repaint_timer.start()
+        # Now that frames will start flowing, kick the UI-side paint
+        # loop — unless VR is already live, where the VR tick owns frame
+        # dispatch and the desktop overlay is invisible.
+        if not vr.is_running():
+            repaint_timer.start()
 
         print(
             f"[overlay] source={name} polling_hz={polling_hz} "
@@ -502,19 +506,29 @@ def run(argv: list[str] | None = None) -> int:
         _start_source(args.source)
 
     # --- VR enable/teardown wiring ------------------------------------
-    # Frame submit runs on its own timer, re-armed to the HMD's display
-    # refresh rate when VR enables (45 Hz placeholder until then). Only
-    # ticks while a VR overlay is actually live. Each visible widget is
-    # grabbed and composited onto one canvas per tick (see
-    # VROverlayOutput). Precise timer type — a coarse timer's 5 %
+    # One timer owns the whole VR frame pipeline: dispatch the latest
+    # telemetry into the widgets, grab them, composite, upload. Folding
+    # the dispatch in (instead of leaving the repaint timer running)
+    # matters at high rates — two timers on the UI thread starve each
+    # other once a tick costs more than the interval, and the headset
+    # then streams stale widget pixels. Re-armed to the HMD's display
+    # refresh rate when VR enables (45 Hz placeholder until then), and
+    # stepped down automatically when the measured tick cost can't
+    # sustain the interval. Precise timer type — a coarse timer's 5 %
     # batching on Windows would cap a ~11 ms interval near 60 Hz.
     vr_submit_timer = QTimer(window)
     vr_submit_timer.setTimerType(Qt.TimerType.PreciseTimer)
     vr_submit_timer.setInterval(int(1000 / 45))
+    vr_tick_ema_ms = [0.0]  # smoothed tick cost, for the step-down
 
     def _vr_submit() -> None:
         if not vr.is_running():
             return
+        t0 = time.perf_counter()
+        f = bus.latest()
+        if f is not None:
+            _dispatch_frame(f, engine, inputs, wheels)
+        t1 = time.perf_counter()
         items = []
         for key, view in (("engine", engine), ("inputs", inputs), *wheels.items()):
             if not view.isVisible():
@@ -522,7 +536,27 @@ def run(argv: list[str] | None = None) -> int:
             g = view.geometry()
             items.append((key, view.grab().toImage(),
                           g.x(), g.y(), g.width(), g.height()))
+        t2 = time.perf_counter()
         vr.submit_widgets(items, layout.screen_w, layout.screen_h)
+        # Adaptive pacing: when a whole tick costs more than ~80 % of the
+        # interval the UI thread has no headroom left for anything else
+        # (tray, hotkeys, detection), so halve the rate instead of
+        # letting the event loop saturate. Steps 90 → 45 → 22 and stays
+        # there; never throttles below ~20 Hz.
+        cost_ms = (time.perf_counter() - t0) * 1000.0
+        ema = vr_tick_ema_ms[0]
+        ema = cost_ms if ema == 0.0 else ema * 0.9 + cost_ms * 0.1
+        vr_tick_ema_ms[0] = ema
+        interval = vr_submit_timer.interval()
+        if ema > interval * 0.8 and interval < 50:
+            vr_submit_timer.setInterval(interval * 2)
+            vr_tick_ema_ms[0] = 0.0
+            pump_ms, composite_ms, upload_ms = vr.phase_ms
+            print(f"[overlay] VR tick costs {ema:.1f} ms "
+                  f"(dispatch {(t1 - t0) * 1000:.1f} + "
+                  f"grab {(t2 - t1) * 1000:.1f} + pump {pump_ms:.1f} + "
+                  f"composite {composite_ms:.1f} + upload {upload_ms:.1f}); "
+                  f"pacing down to {1000 / (interval * 2):.0f} Hz")
 
     # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
     vr_submit_timer.timeout.connect(_vr_submit)
@@ -532,14 +566,15 @@ def run(argv: list[str] | None = None) -> int:
     def _enable_vr() -> bool:
         if not vr.start():
             return False
-        # Pace submit AND repaint at the headset's display rate (fall
-        # back to the desktop refresh rate when the runtime doesn't
-        # report one). The desktop overlay is invisible while VR is live,
-        # so repaint no longer needs to track the monitor.
+        # Pace the VR tick at the headset's display rate (fall back to
+        # the desktop refresh rate when the runtime doesn't report one).
+        # The VR tick dispatches telemetry itself, so the desktop repaint
+        # timer is stopped — the desktop overlay is invisible anyway and
+        # a second timer would just compete for the UI thread.
         hmd_hz = vr.display_hz() or refresh_hz
         vr_submit_timer.setInterval(max(1, round(1000 / hmd_hz)))
-        repaint_timer.setTimerType(Qt.TimerType.PreciseTimer)
-        repaint_timer.setInterval(max(1, round(1000 / hmd_hz)))
+        vr_tick_ema_ms[0] = 0.0
+        repaint_timer.stop()
         print(f"[overlay] VR refresh: {hmd_hz:.0f} Hz")
         # Hide the × buttons — the grab would bake them into the headset
         # quad, and there is no pointer in VR to click them.

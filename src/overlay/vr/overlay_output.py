@@ -1,43 +1,55 @@
-"""Submit the HUD to SteamVR as a single fixed-size overlay quad.
+"""Submit the HUD to SteamVR as one small overlay quad **per widget**.
 
-Each frame the visible widgets are grabbed individually (cheap — only the
-pixels actually drawn) and composited onto one **constant-size** canvas at
-their screen-relative positions; that single canvas is the one frame
-submitted per tick, keeping the upload small (~2.6 MB vs ~19 MB for the
-whole desktop) and the layout identical to the desktop overlay.
+Each visible widget is its own OpenVR overlay: a quad sized and placed on a
+shared virtual plane so the assembly reproduces the desktop layout exactly,
+and its grabbed image is uploaded straight to that quad's texture — no
+compositing, no full-screen canvas. Two wins over the old single
+full-screen quad:
+
+* **Upload is widget-sized, not screen-sized.** The old design composited
+  every widget onto one screen-resolution canvas and uploaded the whole
+  thing each tick — ~14.7 MB at 1440p, most of it transparent. Six small
+  quads upload only the pixels actually drawn (~3.3 MB total at 1440p,
+  ~4.5x less), which is the dominant cost in holding headset rate.
+* **A hidden widget costs nothing.** Closed/hidden widgets simply have
+  their overlay hidden; no transparent pixels are uploaded for them.
+
+Each widget's image is uploaded at its native resolution (the quad's
+physical width is its pixel fraction of the screen times ``WIDTH_M``), so
+text is as crisp on the quad as on the desktop overlay.
 
 Two submission paths, both verified empirically against SteamVR with
 ``scripts/vr_probe.py``:
 
-* **GL texture streaming** (primary) — the canvas is uploaded into a
-  persistent OpenGL texture on an offscreen Qt context and handed to the
+* **GL texture streaming** (primary) — each overlay owns a small ring of
+  persistent OpenGL textures on a shared offscreen Qt context; the grabbed
+  image is uploaded into the next texture in the ring and handed to the
   compositor via ``setOverlayTexture``, which swaps it atomically.
 * **Raw upload** (fallback when GL init fails) — ``setOverlayRaw``
-  rebuilds the overlay's backing texture on every call (~35–110 ms on the
-  UI thread) and the quad can render empty between uploads, which shows
-  as *blinking* at streaming rates. Usable, but strictly worse.
+  rebuilds the overlay's backing texture on every call and the quad can
+  render empty between uploads, which shows as *blinking* at streaming
+  rates. Usable, but strictly worse.
 
 Hard-won rule for either path: **an overlay app must drain its VR event
-queues.** The runtime delivers ~15–25 events/s; if they are never polled
+queues.** The runtime delivers ~15-25 events/s; if they are never polled
 the queue fills after roughly 10 seconds and the IPC channel wedges —
 every subsequent submit fails with ``OverlayError_RequestFailed``,
-forever, even on a freshly recreated overlay handle. Only a process with
-a fresh ``openvr.init`` recovers, which is why the symptom looks like "the
-HUD shows one frame then never updates". Both queues are pumped every
-tick (``_pump_events``); a throttled destroy-and-recreate (``_recreate``)
-remains as last-resort recovery should a submit streak still fail.
+forever. The system queue is per-app; the overlay queue is **per handle**,
+so every live overlay is pumped each tick (``_pump_events``). A throttled
+destroy-and-recreate of all overlays (``_recreate``) remains as last-resort
+recovery should a submit streak still fail.
 
 Two placements (see :meth:`set_placement`):
 
-* ``"head"`` — quad parented to the HMD, fixed in front of the eyes.
+* ``"head"`` — quads parented to the HMD, fixed in front of the eyes.
   Never jitters, always visible; the safe default across every headset.
-* ``"dash"`` — quad frozen in the seated play space exactly where it
-  floats at the moment the mode is activated: the HMD pose is sampled
-  once and composed with the head-locked offset, so the panel locks in
-  place in front of wherever the user is currently looking. More
-  immersive, but OpenVR world-locking can jitter on some headsets
-  (notably Quest over a streamed link), which is why it isn't the
-  default. Re-selecting the mode re-anchors at the current gaze.
+* ``"dash"`` — quads frozen in the seated play space where the assembly
+  floats at the moment the mode is activated: the HMD pose is sampled once
+  and shared by every widget, so the whole panel locks in place in front
+  of wherever the user is currently looking. More immersive, but OpenVR
+  world-locking can jitter on some headsets (notably Quest over a streamed
+  link), which is why it isn't the default. Re-selecting the mode
+  re-anchors at the current gaze.
 
 Everything is guarded: if ``openvr`` can't be imported or SteamVR isn't
 running, :meth:`start` logs and returns ``False`` and the caller stays on
@@ -49,9 +61,7 @@ import ctypes
 import math
 import time
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import (QImage, QOffscreenSurface, QOpenGLContext,
-                           QPainter)
+from PySide6.QtGui import QImage, QOffscreenSurface, QOpenGLContext
 from PySide6.QtOpenGL import QOpenGLTexture
 
 try:
@@ -65,10 +75,11 @@ except Exception as exc:  # pylint: disable=broad-except
 
 
 # --- Placement constants (metres / radians) -------------------------------
-# Tunable once the user can try it on the gaming PC. The panel keeps the
-# screen's aspect ratio; only its physical WIDTH is set — height follows
-# from the submitted image's aspect.
-WIDTH_M = 2.0          # physical width of the quad in metres
+# Tunable once the user can try it on the gaming PC. ``WIDTH_M`` is the
+# physical width of the WHOLE virtual screen plane; each widget quad takes
+# the fraction of it that the widget occupies on screen, so the assembly
+# keeps the screen's aspect and relative layout.
+WIDTH_M = 2.4          # physical width of the whole screen plane in metres
 HEAD_DISTANCE_M = 1.4  # head-locked: how far in front of the eyes
 HEAD_DOWN_M = 0.30     # head-locked: drop it slightly below eye line
 # Legacy seated-dashboard spot — only used as the "dash" fallback when the
@@ -77,15 +88,13 @@ DASH_FORWARD_M = 0.55  # distance forward of the seated origin
 DASH_DOWN_M = 0.45     # how far below the seated eye height
 DASH_PITCH_RAD = math.radians(35.0)  # tilt top toward driver
 
-# Fixed canvas width (px) the whole screen is composited into before upload.
-# Held CONSTANT for the overlay's life so the raw dimensions never change
-# (see rule 1 above). Smaller than the desktop to stay well inside the raw
-# upload size that the compositor accepts; large enough to keep widget text
-# legible on a ~2 m quad read from over a metre away.
-CANVAS_WIDTH = 1280
+# Each overlay keeps a small ring of textures so the compositor never reads
+# the one texture currently being overwritten (single-buffering tears /
+# stalls at streaming rates).
+_TEXTURE_RING = 3
 
-# OpenVR's overlay key must be process-unique; the name is the human label
-# shown in SteamVR's overlay list.
+# OpenVR overlay keys must be process-unique; per-widget keys hang off this
+# base. The name is the human label shown in SteamVR's overlay list.
 _OVERLAY_KEY = "dev.albertowd.live-telemetry-evo"
 _OVERLAY_NAME = "Live Telemetry Evo"
 
@@ -132,25 +141,51 @@ def _mul_matrix(a, b):
     return m
 
 
+class _WidgetOverlay:
+    """One OpenVR overlay quad backing a single widget. Created lazily the
+    first time the widget is submitted; reused for its lifetime."""
+
+    __slots__ = ("key", "handle", "textures", "next_tex", "rect",
+                 "tex_size", "shown")
+
+    def __init__(self, key: str) -> None:
+        self.key = key
+        self.handle = None           # VROverlayHandle_t
+        self.textures: list = []     # GL ring (empty on the raw path)
+        self.next_tex = 0            # round-robin index into the ring
+        self.rect: tuple | None = None       # (x, y, w, h) last applied
+        self.tex_size: tuple | None = None   # (w, h) the ring is sized for
+        self.shown = False           # whether the quad is currently visible
+
+
 class VROverlayOutput:
-    """Lifecycle wrapper around one OpenVR overlay. Lives on the UI thread;
-    every openvr call is guarded so a missing runtime degrades to a no-op."""
+    """Lifecycle wrapper around a set of OpenVR overlays (one per widget).
+    Lives on the UI thread; every openvr call is guarded so a missing
+    runtime degrades to a no-op."""
 
     def __init__(self, placement: str = "head") -> None:
         self._placement = placement if placement in ("head", "dash") else "head"
-        self._ov = None       # IVROverlay
-        self._system = None    # IVRSystem, for the system event queue
-        self._handle = None    # VROverlayHandle_t
+        self._ov = None        # IVROverlay
+        self._system = None     # IVRSystem, for the system event queue
         self._running = False
-        self._canvas_h = 0     # fixed once the screen aspect is known
+        self._overlays: dict[str, _WidgetOverlay] = {}
+        # Re-apply every overlay's transform on the next submit (set on
+        # start and whenever the placement mode changes).
+        self._placement_dirty = True
+        # HMD pose shared by all quads in "dash" mode, sampled once when the
+        # placement is (re)applied so the whole panel anchors together.
+        self._dash_anchor = None
         self._last_error = ""  # last submit error name, to log only changes
         self._fail_streak = 0  # consecutive submit failures
         self._next_recreate = 0.0  # monotonic deadline for the next rebuild
         # GL texture streaming state (None => raw-upload fallback).
         self._gl_ctx = None        # QOpenGLContext
         self._gl_surface = None    # QOffscreenSurface
-        self._gl_textures = []     # ring of live QOpenGLTextures
-        self._ovr_texture = None   # reusable openvr.Texture_t
+        self._ovr_texture = None   # reusable openvr.Texture_t (handle set per upload)
+        # Last submit's phase costs in ms — (pump, prep, upload). Surfaced
+        # so the app's step-down log can say WHERE a slow tick spends its
+        # time instead of just how long it took.
+        self.phase_ms: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
     # --- queries ----------------------------------------------------------
     @staticmethod
@@ -159,7 +194,7 @@ class VROverlayOutput:
         return openvr is not None
 
     def is_running(self) -> bool:
-        """Whether an overlay is live and accepting frames."""
+        """Whether the overlays are live and accepting frames."""
         return self._running
 
     @property
@@ -184,11 +219,12 @@ class VROverlayOutput:
 
     # --- lifecycle --------------------------------------------------------
     def start(self) -> bool:
-        """Init OpenVR as an overlay app and create + show the quad.
+        """Init OpenVR as an overlay app. Individual widget quads are
+        created lazily on first submit.
 
         Returns ``True`` on success. On any failure (no binding, SteamVR
-        not running, overlay creation rejected) it logs a single line and
-        returns ``False`` so the caller can stay on the desktop overlay.
+        not running) it logs a single line and returns ``False`` so the
+        caller can stay on the desktop overlay.
         """
         if self._running:
             return True
@@ -199,20 +235,12 @@ class VROverlayOutput:
             openvr.init(openvr.VRApplication_Overlay)
             self._system = openvr.VRSystem()
             self._ov = openvr.VROverlay()
-            self._handle = self._ov.createOverlay(_OVERLAY_KEY, _OVERLAY_NAME)
-            self._ov.setOverlayWidthInMeters(self._handle, WIDTH_M)
-            # Non-interactive HUD — no laser/mouse input on the quad.
-            self._ov.setOverlayInputMethod(
-                self._handle, openvr.VROverlayInputMethod_None
-            )
-            self._apply_placement()
-            self._ov.showOverlay(self._handle)
         except Exception as exc:  # pylint: disable=broad-except
             print(f"[overlay] VR overlay init failed: {exc}")
             self._safe_shutdown()
             return False
         self._init_gl()
-        self._apply_texture_bounds()
+        self._placement_dirty = True
         self._running = True
         mode = "gl" if self._gl_ctx is not None else "raw"
         print(f"[overlay] VR overlay started "
@@ -220,13 +248,12 @@ class VROverlayOutput:
         return True
 
     def _init_gl(self) -> None:
-        """Set up the offscreen GL context used to stream frames via
-        ``setOverlayTexture``. The raw path (``setOverlayRaw``) recreates
-        the overlay's backing texture on every call (~35–110 ms) and the
-        quad can render empty between uploads — visible blinking at
-        streaming rates. A persistent GL texture is swapped atomically by
-        the compositor instead. On any failure GL stays off and submits
-        fall back to the raw path."""
+        """Set up the offscreen GL context shared by every overlay's texture
+        ring. The raw path (``setOverlayRaw``) recreates each overlay's
+        backing texture on every call and the quad can render empty between
+        uploads — visible blinking at streaming rates. Persistent GL
+        textures are swapped atomically by the compositor instead. On any
+        failure GL stays off and submits fall back to the raw path."""
         try:
             ctx = QOpenGLContext()
             if not ctx.create():
@@ -250,27 +277,54 @@ class VROverlayOutput:
         self._ovr_texture.eType = openvr.TextureType_OpenGL
         self._ovr_texture.eColorSpace = openvr.ColorSpace_Gamma
 
-    def _apply_texture_bounds(self) -> None:
+    def _ensure_overlay(self, key: str) -> _WidgetOverlay | None:
+        """Return the overlay for ``key``, creating its quad on first use.
+        Returns ``None`` if creation fails (the widget is skipped this
+        frame; the next frame retries)."""
+        ov = self._overlays.get(key)
+        if ov is not None and ov.handle is not None:
+            return ov
+        if ov is None:
+            ov = _WidgetOverlay(key)
+            self._overlays[key] = ov
+        try:
+            ov.handle = self._ov.createOverlay(
+                f"{_OVERLAY_KEY}.{key}", f"{_OVERLAY_NAME} {key}")
+            # Non-interactive HUD — no laser/mouse input on the quad.
+            self._ov.setOverlayInputMethod(
+                ov.handle, openvr.VROverlayInputMethod_None)
+            self._apply_texture_bounds(ov)
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"[overlay] VR overlay create failed ({key}): "
+                  f"{type(exc).__name__}: {exc}")
+            ov.handle = None
+            return None
+        # Force a transform apply on the next use of this fresh handle.
+        ov.rect = None
+        ov.shown = False
+        return ov
+
+    def _apply_texture_bounds(self, ov: _WidgetOverlay) -> None:
         """Flip the overlay's V texture coordinates when streaming GL.
 
-        The composited QImage is top-down but GL samples textures
-        bottom-up, so the quad renders upside down on the GL path.
-        Swapping vMin/vMax on the overlay corrects it once, with no
-        per-frame mirroring cost. The raw path uploads bytes in the
-        order the compositor expects, so it keeps default bounds."""
+        The grabbed QImage is top-down but GL samples textures bottom-up,
+        so the quad renders upside down on the GL path. Swapping vMin/vMax
+        on the overlay corrects it once, with no per-frame mirroring cost.
+        The raw path uploads bytes in the order the compositor expects, so
+        it keeps default bounds."""
         if self._gl_ctx is None:
             return
         try:
             bounds = openvr.VRTextureBounds_t()
             bounds.uMin, bounds.uMax = 0.0, 1.0
             bounds.vMin, bounds.vMax = 1.0, 0.0
-            self._ov.setOverlayTextureBounds(self._handle, bounds)
+            self._ov.setOverlayTextureBounds(ov.handle, bounds)
         except Exception as exc:  # pylint: disable=broad-except
             # Worst case the HUD shows flipped; never block startup on it.
             print(f"[overlay] VR texture bounds update failed: {exc}")
 
     def stop(self) -> None:
-        """Destroy the overlay and shut OpenVR down. Idempotent."""
+        """Destroy all overlays and shut OpenVR down. Idempotent."""
         if not self._running and self._ov is None:
             return
         self._safe_shutdown()
@@ -278,68 +332,84 @@ class VROverlayOutput:
         print("[overlay] VR overlay stopped")
 
     def _safe_shutdown(self) -> None:
+        # Destroy GL textures first while the context is still current.
         try:
-            if self._ov is not None and self._handle is not None:
-                self._ov.destroyOverlay(self._handle)
+            if self._gl_ctx is not None:
+                self._gl_ctx.makeCurrent(self._gl_surface)
+                for ov in self._overlays.values():
+                    for tex in ov.textures:
+                        tex.destroy()
+                self._gl_ctx.doneCurrent()
         except Exception:  # pylint: disable=broad-except
             pass
+        try:
+            if self._ov is not None:
+                for ov in self._overlays.values():
+                    if ov.handle is not None:
+                        try:
+                            self._ov.destroyOverlay(ov.handle)
+                        except Exception:  # pylint: disable=broad-except
+                            pass
+        finally:
+            self._overlays = {}
         try:
             if openvr is not None:
                 openvr.shutdown()
         except Exception:  # pylint: disable=broad-except
             pass
-        try:
-            if self._gl_ctx is not None:
-                self._gl_ctx.makeCurrent(self._gl_surface)
-                for tex in self._gl_textures:
-                    tex.destroy()
-                self._gl_ctx.doneCurrent()
-        except Exception:  # pylint: disable=broad-except
-            pass
-        self._gl_textures = []
         self._gl_ctx = None
         self._gl_surface = None
         self._ovr_texture = None
         self._ov = None
         self._system = None
-        self._handle = None
+        self._dash_anchor = None
 
     # --- placement --------------------------------------------------------
     def set_placement(self, mode: str) -> None:
-        """Switch between ``"head"`` and ``"dash"``. Applies live if the
-        overlay is already running, so the tray menu updates without a
-        restart; otherwise it just records the choice for :meth:`start`."""
+        """Switch between ``"head"`` and ``"dash"``. Applies on the next
+        submit (re-anchoring the dash pose), so the tray menu updates
+        without a restart; otherwise it just records the choice."""
         if mode not in ("head", "dash"):
             return
         self._placement = mode
-        if self._running and self._ov is not None:
-            try:
-                self._apply_placement()
-            except Exception as exc:  # pylint: disable=broad-except
-                print(f"[overlay] VR placement update failed: {exc}")
+        self._placement_dirty = True
 
-    def _apply_placement(self) -> None:
-        if self._placement == "dash":
-            # World-anchored exactly where the panel currently floats:
-            # the head-locked offset composed with the HMD pose sampled at
-            # activation, so the quad freezes in place in front of wherever
-            # the user is looking right now. Falls back to the legacy
-            # seated-dashboard spot if no valid pose is available yet.
-            offset = _matrix(0.0, 0.0, -HEAD_DOWN_M, -HEAD_DISTANCE_M)
-            hmd = self._hmd_pose()
-            if hmd is not None:
-                m = _mul_matrix(hmd, offset)
+    def _apply_transform(self, ov: _WidgetOverlay,
+                         x: int, y: int, w: int, h: int,
+                         screen_w: int, screen_h: int) -> None:
+        """Size and place ``ov``'s quad so it occupies the same region of
+        the virtual screen plane that the widget occupies on screen.
+
+        The whole screen maps to a ``WIDTH_M``-wide plane, so the quad's
+        physical width is the widget's pixel fraction of it and its centre
+        is offset from the plane centre by the widget centre's distance
+        from the screen centre (screen-Y is down, VR-Y is up)."""
+        mpp = WIDTH_M / screen_w           # metres per screen pixel
+        width_m = max(0.001, w * mpp)
+        cx = x + w / 2.0
+        cy = y + h / 2.0
+        dx = (cx - screen_w / 2.0) * mpp   # +right
+        dy = -(cy - screen_h / 2.0) * mpp  # +up
+        try:
+            self._ov.setOverlayWidthInMeters(ov.handle, width_m)
+            if self._placement == "dash":
+                offset = _matrix(0.0, dx, -HEAD_DOWN_M + dy, -HEAD_DISTANCE_M)
+                if self._dash_anchor is not None:
+                    m = _mul_matrix(self._dash_anchor, offset)
+                else:
+                    m = _matrix(DASH_PITCH_RAD, dx,
+                                -DASH_DOWN_M + dy, -DASH_FORWARD_M)
+                self._ov.setOverlayTransformAbsolute(
+                    ov.handle, openvr.TrackingUniverseSeated, m)
             else:
-                m = _matrix(DASH_PITCH_RAD, 0.0, -DASH_DOWN_M, -DASH_FORWARD_M)
-            self._ov.setOverlayTransformAbsolute(
-                self._handle, openvr.TrackingUniverseSeated, m
-            )
-        else:
-            # Parented to the HMD: fixed in front of the eyes, no rotation.
-            m = _matrix(0.0, 0.0, -HEAD_DOWN_M, -HEAD_DISTANCE_M)
-            self._ov.setOverlayTransformTrackedDeviceRelative(
-                self._handle, openvr.k_unTrackedDeviceIndex_Hmd, m
-            )
+                # Parented to the HMD: fixed in front of the eyes.
+                m = _matrix(0.0, dx, -HEAD_DOWN_M + dy, -HEAD_DISTANCE_M)
+                self._ov.setOverlayTransformTrackedDeviceRelative(
+                    ov.handle, openvr.k_unTrackedDeviceIndex_Hmd, m)
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"[overlay] VR placement update failed ({ov.key}): {exc}")
+            return
+        ov.rect = (x, y, w, h)
 
     def _hmd_pose(self):
         """Sample the HMD's current pose in the seated universe as an
@@ -362,75 +432,116 @@ class VROverlayOutput:
 
     # --- frame submit -----------------------------------------------------
     def submit_widgets(self, widgets, screen_w: int, screen_h: int) -> None:
-        """Composite the visible widgets onto the fixed canvas and push it.
+        """Push each visible widget to its own overlay quad.
 
         ``widgets`` is an iterable of ``(key, image, x, y, w, h)`` where
         ``image`` is the grabbed widget and ``x/y/w/h`` is its rect in
-        screen-logical pixels. Each widget is drawn at the same relative
-        position on a constant ``CANVAS_WIDTH``×``_canvas_h`` canvas, which
-        is uploaded as the single raw frame. Holding the canvas size fixed
-        is what keeps the compositor accepting frames (see module docstring).
+        screen-logical pixels. Only the listed widgets are visible; any
+        overlay whose widget isn't listed this frame is hidden (a closed
+        widget therefore uploads nothing). Each widget's image is uploaded
+        at native resolution and placed on the shared plane, so the layout
+        — and text sharpness — matches the desktop overlay.
         """
-        if not self._running or self._ov is None or self._handle is None:
+        if not self._running or self._ov is None:
             return
         if screen_w <= 0 or screen_h <= 0:
             return
+        t0 = time.perf_counter()
         # MUST run every tick: an undrained event queue wedges the IPC
         # channel after ~10 s and every upload fails from then on (see
         # module docstring).
         self._pump_events()
-        # Lock the canvas height to the screen aspect on first use; never
-        # changes afterwards, so the raw dimensions stay constant.
-        if self._canvas_h == 0:
-            self._canvas_h = max(1, round(CANVAS_WIDTH * screen_h / screen_w))
-        scale = CANVAS_WIDTH / screen_w
+        t1 = time.perf_counter()
 
-        canvas = QImage(CANVAS_WIDTH, self._canvas_h,
-                        QImage.Format.Format_RGBA8888)
-        canvas.fill(0)  # fully transparent everywhere a widget isn't drawn
-        painter = QPainter(canvas)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        for _key, image, x, y, w, h in widgets:
+        # Re-anchor / re-apply transforms once when the placement changed.
+        reapply = self._placement_dirty
+        if reapply:
+            self._dash_anchor = (self._hmd_pose()
+                                 if self._placement == "dash" else None)
+            self._placement_dirty = False
+
+        upload_ms = 0.0
+        seen: set[str] = set()
+        for key, image, x, y, w, h in widgets:
             if w <= 0 or h <= 0 or image.isNull():
                 continue
-            painter.drawImage(
-                QRectF(x * scale, y * scale, w * scale, h * scale), image
-            )
-        painter.end()
+            seen.add(key)
+            ov = self._ensure_overlay(key)
+            if ov is None:
+                continue
+            if reapply or ov.rect != (x, y, w, h):
+                self._apply_transform(ov, x, y, w, h, screen_w, screen_h)
+            # The texture upload wants tightly-packed RGBA8888 (stride ==
+            # w*4); convert the grab once if it came back in another format.
+            if image.format() != QImage.Format.Format_RGBA8888:
+                image = image.convertToFormat(QImage.Format.Format_RGBA8888)
+            u0 = time.perf_counter()
+            if self._gl_ctx is not None:
+                ok = self._upload_gl(ov, image)
+            else:
+                ok = self._upload_raw(ov, image)
+            upload_ms += (time.perf_counter() - u0) * 1000.0
+            if ok and not ov.shown:
+                try:
+                    self._ov.showOverlay(ov.handle)
+                    ov.shown = True
+                except Exception:  # pylint: disable=broad-except
+                    pass
 
-        if self._gl_ctx is not None:
-            self._submit_gl(canvas)
-        else:
-            self._submit_raw(canvas)
+        self._hide_unused(seen)
+        t2 = time.perf_counter()
+        self.phase_ms = ((t1 - t0) * 1000.0,
+                         (t2 - t1) * 1000.0 - upload_ms,
+                         upload_ms)
 
-    def _submit_gl(self, image: QImage) -> None:
-        """Push one composited frame as a GL texture via
-        ``setOverlayTexture`` — the streaming path. The compositor keeps
-        reading the submitted texture between submits, so a small ring of
-        textures stays alive and only the oldest is destroyed."""
+    def _upload_gl(self, ov: _WidgetOverlay, image: QImage) -> bool:
+        """Push one widget frame as a GL texture via ``setOverlayTexture``.
+        The ring is allocated once per size and updated in place
+        round-robin: creating a texture per frame doubles the driver work
+        and stalls at headset rates, while the ring keeps the compositor
+        reading a texture that isn't the one being overwritten."""
+        w, h = image.width(), image.height()
         try:
             if not self._gl_ctx.makeCurrent(self._gl_surface):
                 raise RuntimeError("makeCurrent failed")
-            tex = QOpenGLTexture(
-                image, QOpenGLTexture.MipMapGeneration.DontGenerateMipMaps)
+            # (Re)allocate the ring when the widget size changes (e.g. the
+            # in-overlay size-cycle button).
+            if ov.tex_size != (w, h):
+                for tex in ov.textures:
+                    tex.destroy()
+                ov.textures = []
+                ov.next_tex = 0
+                for _ in range(_TEXTURE_RING):
+                    tex = QOpenGLTexture(QOpenGLTexture.Target.Target2D)
+                    tex.setFormat(QOpenGLTexture.TextureFormat.RGBA8_UNorm)
+                    tex.setSize(w, h)
+                    tex.setMipLevels(1)
+                    tex.setMinMagFilters(QOpenGLTexture.Filter.Linear,
+                                         QOpenGLTexture.Filter.Linear)
+                    tex.allocateStorage(QOpenGLTexture.PixelFormat.RGBA,
+                                        QOpenGLTexture.PixelType.UInt8)
+                    ov.textures.append(tex)
+                ov.tex_size = (w, h)
+            tex = ov.textures[ov.next_tex]
+            ov.next_tex = (ov.next_tex + 1) % len(ov.textures)
+            tex.setData(QOpenGLTexture.PixelFormat.RGBA,
+                        QOpenGLTexture.PixelType.UInt8,
+                        image.constBits())
             self._ovr_texture.handle = int(tex.textureId())
-            self._ov.setOverlayTexture(self._handle, self._ovr_texture)
-            self._gl_textures.append(tex)
-            if len(self._gl_textures) > 3:
-                self._gl_textures.pop(0).destroy()
+            self._ov.setOverlayTexture(ov.handle, self._ovr_texture)
         except Exception as exc:  # pylint: disable=broad-except
-            self._on_submit_failure(exc, image.width(), image.height())
-            return
-        self._on_submit_success(image.width(), image.height())
+            self._on_submit_failure(exc, w, h)
+            return False
+        self._on_submit_success(w, h)
+        return True
 
-    def _submit_raw(self, image: QImage) -> None:
+    def _upload_raw(self, ov: _WidgetOverlay, image: QImage) -> bool:
         """Fallback when GL init failed: push the frame as raw RGBA bytes.
         ``setOverlayRaw`` rebuilds the overlay texture every call (slow,
-        can blink at streaming rates) but needs no GPU plumbing.
-        """
+        can blink at streaming rates) but needs no GPU plumbing."""
         w, h = image.width(), image.height()
         if w == 0 or h == 0:
-            return
+            return False
         # RGBA8888 has no row padding (stride == w*4), so the raw buffer is
         # exactly w*h*4 contiguous bytes.
         data = bytes(image.constBits())
@@ -441,11 +552,25 @@ class VROverlayOutput:
             # make ``byref`` take the address *of the pointer variable* rather
             # than of the pixel data, and the native read walks off into
             # unmapped memory (access violation, then a wedged overlay).
-            self._ov.setOverlayRaw(self._handle, buf, w, h, 4)
+            self._ov.setOverlayRaw(ov.handle, buf, w, h, 4)
         except Exception as exc:  # pylint: disable=broad-except
             self._on_submit_failure(exc, w, h)
-            return
+            return False
         self._on_submit_success(w, h)
+        return True
+
+    def _hide_unused(self, seen: set[str]) -> None:
+        """Hide overlays whose widget wasn't submitted this frame (closed /
+        hidden widgets). Hidden quads upload nothing and cost nothing; the
+        handle is kept so re-showing is instant."""
+        for key, ov in self._overlays.items():
+            if key in seen or not ov.shown or ov.handle is None:
+                continue
+            try:
+                self._ov.hideOverlay(ov.handle)
+            except Exception:  # pylint: disable=broad-except
+                pass
+            ov.shown = False
 
     def _on_submit_failure(self, exc: Exception, w: int, h: int) -> None:
         """Shared bookkeeping for a failed submit: change-only logging and
@@ -459,7 +584,7 @@ class VROverlayOutput:
             print(f"[overlay] VR submit failed ({w}x{h}): {detail}")
         # With the event queues pumped this should essentially never
         # happen; a sustained streak means something is genuinely
-        # wedged, so try a fresh handle as a last resort.
+        # wedged, so try fresh handles as a last resort.
         self._fail_streak += 1
         now = time.monotonic()
         if self._fail_streak >= 10 and now >= self._next_recreate:
@@ -474,44 +599,50 @@ class VROverlayOutput:
 
     # --- event pump / wedge recovery ---------------------------------------
     def _pump_events(self) -> None:
-        """Drain the system and overlay event queues. The events themselves
-        are irrelevant to the HUD; what matters is that they're consumed
-        (an overflowing queue permanently wedges raw uploads)."""
+        """Drain the system queue and every overlay's queue. The events
+        themselves are irrelevant to the HUD; what matters is that they're
+        consumed (an overflowing queue permanently wedges raw uploads).
+        The overlay queue is per handle, so every live overlay is pumped."""
         event = openvr.VREvent_t()
         try:
             while self._system is not None and self._system.pollNextEvent(event):
                 pass
-            while True:
-                result, _ = self._ov.pollNextOverlayEvent(self._handle, event)
-                if not result:
-                    break
+            for ov in self._overlays.values():
+                if ov.handle is None:
+                    continue
+                while True:
+                    result, _ = self._ov.pollNextOverlayEvent(ov.handle, event)
+                    if not result:
+                        break
         except Exception:  # pylint: disable=broad-except
             # A failed poll must never take down the submit path; worst
             # case the queue stays fuller for one tick.
             pass
 
     def _recreate(self) -> None:
-        """Destroy and rebuild the overlay quad in-place to unwedge the
-        compositor's raw-upload path. Throttled by the caller."""
-        print("[overlay] VR overlay wedged; recreating")
+        """Destroy every overlay quad to unwedge the compositor's
+        raw-upload path; the next submit rebuilds them lazily. Throttled by
+        the caller."""
+        print("[overlay] VR overlays wedged; recreating")
         try:
-            self._ov.destroyOverlay(self._handle)
+            if self._gl_ctx is not None:
+                self._gl_ctx.makeCurrent(self._gl_surface)
         except Exception:  # pylint: disable=broad-except
             pass
-        try:
-            self._handle = self._ov.createOverlay(_OVERLAY_KEY, _OVERLAY_NAME)
-            self._ov.setOverlayWidthInMeters(self._handle, WIDTH_M)
-            self._ov.setOverlayInputMethod(
-                self._handle, openvr.VROverlayInputMethod_None
-            )
-            self._apply_placement()
-            self._apply_texture_bounds()
-            self._ov.showOverlay(self._handle)
-        except Exception as exc:  # pylint: disable=broad-except
-            # Next throttle window retries; the key may be transiently
-            # in use right after the destroy.
-            print(f"[overlay] VR overlay recreate failed: "
-                  f"{type(exc).__name__}: {exc}")
+        for ov in self._overlays.values():
+            for tex in ov.textures:
+                try:
+                    tex.destroy()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            if ov.handle is not None:
+                try:
+                    self._ov.destroyOverlay(ov.handle)
+                except Exception:  # pylint: disable=broad-except
+                    pass
+        # Drop all per-widget state; submit_widgets recreates on demand.
+        self._overlays = {}
+        self._placement_dirty = True
 
 
 __all__ = ["VROverlayOutput"]
