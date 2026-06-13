@@ -82,6 +82,12 @@ except Exception as exc:  # pylint: disable=broad-except
 WIDTH_M = 2.4          # physical width of the whole screen plane in metres
 HEAD_DISTANCE_M = 1.4  # head-locked: how far in front of the eyes
 HEAD_DOWN_M = 0.30     # head-locked: drop it slightly below eye line
+# Pull widgets horizontally toward the centre of view. The exact
+# flat-screen mapping puts the corner wheels out near the edge of the FOV,
+# which feels too wide in a headset; <1.0 compresses only the sideways
+# offset (vertical positions and widget sizes are untouched, and the
+# centred engine/inputs don't move). 1.0 == exact desktop layout.
+HORIZONTAL_SPREAD = 0.8
 # Legacy seated-dashboard spot — only used as the "dash" fallback when the
 # HMD pose can't be sampled at activation (tracking not valid yet).
 DASH_FORWARD_M = 0.55  # distance forward of the seated origin
@@ -388,7 +394,7 @@ class VROverlayOutput:
         width_m = max(0.001, w * mpp)
         cx = x + w / 2.0
         cy = y + h / 2.0
-        dx = (cx - screen_w / 2.0) * mpp   # +right
+        dx = (cx - screen_w / 2.0) * mpp * HORIZONTAL_SPREAD  # +right
         dy = -(cy - screen_h / 2.0) * mpp  # +up
         try:
             self._ov.setOverlayWidthInMeters(ov.handle, width_m)
