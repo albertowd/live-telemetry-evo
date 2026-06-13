@@ -88,6 +88,12 @@ HEAD_DOWN_M = 0.30     # head-locked: drop it slightly below eye line
 # offset (vertical positions and widget sizes are untouched, and the
 # centred engine/inputs don't move). 1.0 == exact desktop layout.
 HORIZONTAL_SPREAD = 0.8
+# Widgets are placed on a vertical CYLINDER centred on the head rather than
+# a flat plane, so the panel wraps gently around the viewer and the corner
+# widgets turn to face inward instead of skewing away at the edge of
+# vision. The radius matches the head-locked viewing distance, so the
+# centre widget sits exactly where the flat plane used to.
+CYLINDER_RADIUS_M = HEAD_DISTANCE_M
 # Legacy seated-dashboard spot — only used as the "dash" fallback when the
 # HMD pose can't be sampled at activation (tracking not valid yet).
 DASH_FORWARD_M = 0.55  # distance forward of the seated origin
@@ -144,6 +150,30 @@ def _mul_matrix(a, b):
             if c == 3:
                 v += a.m[r][3]
             m.m[r][c] = v
+    return m
+
+
+def _cylinder_matrix(theta: float, ty: float, radius: float):
+    """Build a ``HmdMatrix34_t`` placing a quad on a vertical cylinder of
+    the given ``radius`` at horizontal angle ``theta`` (radians, +right),
+    yawed so its face turns back toward the cylinder's axis (the head).
+
+    ``ty`` is the vertical offset; height is independent of the angle. At
+    ``theta == 0`` this reduces to the old flat placement (x=0, z=-radius,
+    no rotation), so the centre widget is unchanged."""
+    m = _identity_matrix()
+    cos, sin = math.cos(theta), math.sin(theta)
+    # Yaw about Y so the quad's +Z face points back at the axis. Columns
+    # 0/2 are the rotated right/normal axes; up (column 1) stays vertical.
+    m.m[0][0] = cos
+    m.m[0][2] = -sin
+    m.m[2][0] = sin
+    m.m[2][2] = cos
+    # Position around the cylinder: straight ahead at theta=0 (x=0,
+    # z=-radius), wrapping toward the viewer as |theta| grows.
+    m.m[0][3] = radius * sin
+    m.m[1][3] = ty
+    m.m[2][3] = -radius * cos
     return m
 
 
@@ -383,33 +413,42 @@ class VROverlayOutput:
     def _apply_transform(self, ov: _WidgetOverlay,
                          x: int, y: int, w: int, h: int,
                          screen_w: int, screen_h: int) -> None:
-        """Size and place ``ov``'s quad so it occupies the same region of
-        the virtual screen plane that the widget occupies on screen.
+        """Size and place ``ov``'s quad on the curved (cylindrical) screen
+        so it occupies the same region the widget occupies on screen.
 
-        The whole screen maps to a ``WIDTH_M``-wide plane, so the quad's
-        physical width is the widget's pixel fraction of it and its centre
-        is offset from the plane centre by the widget centre's distance
-        from the screen centre (screen-Y is down, VR-Y is up)."""
+        The whole screen maps to a ``WIDTH_M``-wide arc, so the quad's
+        physical width is the widget's pixel fraction of it; the widget's
+        horizontal distance from screen centre becomes an arc length, hence
+        an angle around the cylinder, and the quad is yawed to face inward.
+        Vertical offset stays a straight translation (screen-Y is down,
+        VR-Y is up)."""
         mpp = WIDTH_M / screen_w           # metres per screen pixel
         width_m = max(0.001, w * mpp)
         cx = x + w / 2.0
         cy = y + h / 2.0
-        dx = (cx - screen_w / 2.0) * mpp * HORIZONTAL_SPREAD  # +right
+        # Horizontal offset -> arc length -> angle on the cylinder.
+        arc = (cx - screen_w / 2.0) * mpp * HORIZONTAL_SPREAD
+        theta = arc / CYLINDER_RADIUS_M
         dy = -(cy - screen_h / 2.0) * mpp  # +up
         try:
             self._ov.setOverlayWidthInMeters(ov.handle, width_m)
             if self._placement == "dash":
-                offset = _matrix(0.0, dx, -HEAD_DOWN_M + dy, -HEAD_DISTANCE_M)
+                offset = _cylinder_matrix(theta, -HEAD_DOWN_M + dy,
+                                          CYLINDER_RADIUS_M)
                 if self._dash_anchor is not None:
                     m = _mul_matrix(self._dash_anchor, offset)
                 else:
-                    m = _matrix(DASH_PITCH_RAD, dx,
+                    # No valid pose at activation: fall back to the legacy
+                    # flat seated spot (curve needs a head anchor to wrap
+                    # around). Rare — tracking invalid mid-startup.
+                    m = _matrix(DASH_PITCH_RAD, arc,
                                 -DASH_DOWN_M + dy, -DASH_FORWARD_M)
                 self._ov.setOverlayTransformAbsolute(
                     ov.handle, openvr.TrackingUniverseSeated, m)
             else:
-                # Parented to the HMD: fixed in front of the eyes.
-                m = _matrix(0.0, dx, -HEAD_DOWN_M + dy, -HEAD_DISTANCE_M)
+                # Parented to the HMD: the cylinder wraps around the eyes.
+                m = _cylinder_matrix(theta, -HEAD_DOWN_M + dy,
+                                     CYLINDER_RADIUS_M)
                 self._ov.setOverlayTransformTrackedDeviceRelative(
                     ov.handle, openvr.k_unTrackedDeviceIndex_Hmd, m)
         except Exception as exc:  # pylint: disable=broad-except
