@@ -58,7 +58,7 @@ The project uses a local virtual environment so it does not touch the system Pyt
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python -m overlay
+python -m live_telemetry_evo
 ```
 
 Or use `run.bat`, which uses the venv's Python directly (no activation needed).
@@ -66,16 +66,16 @@ Or use `run.bat`, which uses the venv's Python directly (no activation needed).
 ### Command-line flags
 
 ```bash
-python -m overlay                      # default — auto-detect the running game
-python -m overlay --source ac-evo      # force Assetto Corsa Evo
-python -m overlay --source acc         # force Assetto Corsa Competizione
-python -m overlay --source acrally     # force Assetto Corsa Rally
-python -m overlay --source ac1         # force original Assetto Corsa
-python -m overlay --source synthetic   # animated mock data, no game required
-python -m overlay --hz 120             # one-shot override; 0 (default) uses the
+python -m live_telemetry_evo                      # default — auto-detect the running game
+python -m live_telemetry_evo --source ac-evo      # force Assetto Corsa Evo
+python -m live_telemetry_evo --source acc         # force Assetto Corsa Competizione
+python -m live_telemetry_evo --source acrally     # force Assetto Corsa Rally
+python -m live_telemetry_evo --source ac1         # force original Assetto Corsa
+python -m live_telemetry_evo --source synthetic   # animated mock data, no game required
+python -m live_telemetry_evo --hz 120             # one-shot override; 0 (default) uses the
                                        # persisted tray choice (default 60)
-python -m overlay --vr                 # force the VR overlay on (SteamVR)
-python -m overlay --novr               # force VR off (pure desktop overlay)
+python -m live_telemetry_evo --vr                 # force the VR overlay on (SteamVR)
+python -m live_telemetry_evo --novr               # force VR off (pure desktop overlay)
 ```
 
 The polling rate is **persisted across sessions** (`30 / 60 / 100 / 120 / 144 /
@@ -491,7 +491,7 @@ them in the same Explorer window the app was launched from — no
 
 - **Frozen build (.exe)** — `<exe-dir>\positions.json` and
   `<exe-dir>\logs\*.csv`.
-- **Dev (`python -m overlay`)** — current working directory; both paths
+- **Dev (`python -m live_telemetry_evo`)** — current working directory; both paths
   are git-ignored.
 - **Override** — set `LIVE_TELEMETRY_DATA_DIR=<abs-path>` to redirect
   both (useful for a portable install on a shared machine).
@@ -564,12 +564,12 @@ When the game is running, dump real bytes / parsed fields to verify the struct
 layout or hunt unknown offsets:
 
 ```bash
-python -m overlay.sources.dump physics --parsed
-python -m overlay.sources.dump graphics --parsed
-python -m overlay.sources.dump static  --parsed --watch 1.0
-python -m overlay.sources.dump physics --bytes 256                # raw hex window
-python -m overlay.sources.dump physics --scan 0.5 1.0             # aligned floats in [LO,HI]
-python -m overlay.sources.dump physics --track-monotonic 60 0.5 1.0   # 60 s, find wear-like fields
+python -m live_telemetry_evo.sources.dump physics --parsed
+python -m live_telemetry_evo.sources.dump graphics --parsed
+python -m live_telemetry_evo.sources.dump static  --parsed --watch 1.0
+python -m live_telemetry_evo.sources.dump physics --bytes 256                # raw hex window
+python -m live_telemetry_evo.sources.dump physics --scan 0.5 1.0             # aligned floats in [LO,HI]
+python -m live_telemetry_evo.sources.dump physics --track-monotonic 60 0.5 1.0   # 60 s, find wear-like fields
 ```
 
 The `--scan` and `--track-monotonic` modes are useful when AC Evo extends the layout
@@ -580,8 +580,8 @@ and the overlay needs to be re-pointed at a moved field.
 ## Project layout
 
 ```
-src/overlay/
-├── __main__.py                # `python -m overlay` entry point
+src/live_telemetry_evo/
+├── __main__.py                # `python -m live_telemetry_evo` entry point
 ├── app.py                     # CLI parsing, layout + size cycling, threads the source
 ├── window.py                  # frameless / translucent / always-on-top window + Win32 hotkeys
 ├── tray.py                    # system-tray icon + context menu (reset / click-through / size / Hz / logging / update / quit)
@@ -605,7 +605,7 @@ src/overlay/
 │   ├── acc.py                 # Assetto Corsa Competizione shared-memory reader
 │   ├── acrally.py             # Assetto Corsa Rally shared-memory reader
 │   ├── _win32_mapping.py      # NamedMapping (OpenFileMappingW) shared by all live readers
-│   └── dump.py                # `python -m overlay.sources.dump` for SHM debugging
+│   └── dump.py                # `python -m live_telemetry_evo.sources.dump` for SHM debugging
 ├── vr/
 │   ├── detect.py              # SteamVR-running + HMD-present probes (auto-enable signal)
 │   └── overlay_output.py      # VROverlayOutput — OpenVR overlay quad: lifecycle, placement, RGBA submit
@@ -634,7 +634,7 @@ the live AC Evo reader (or any future source) does not touch any UI code.
   not steal mouse input from the game. Toggle it off with `Ctrl+Alt+L` before trying
   to drag a widget.
 - **VR quad geometry is tunable.** The panel size and head-locked offset live in
-  labelled constants at the top of `src/overlay/vr/overlay_output.py` (`WIDTH_M`,
+  labelled constants at the top of `src/live_telemetry_evo/vr/overlay_output.py` (`WIDTH_M`,
   `HEAD_DISTANCE_M`, `HEAD_DOWN_M`) — the first things to adjust if the panel feels
   too large or too close in a given headset. *Fixed in place* uses the same offset
   relative to where you're looking when the mode is selected.
@@ -646,6 +646,6 @@ the live AC Evo reader (or any future source) does not touch any UI code.
 This project was kicked off by Kunos's official AC Evo shared-memory guide on
 Steam:
 [**Assetto Corsa EVO — Shared Memory documentation**](https://steamcommunity.com/sharedfiles/filedetails/?id=3707421508).
-The struct layouts in `src/overlay/sources/ac_evo.py` are transcribed straight
+The struct layouts in `src/live_telemetry_evo/sources/ac_evo.py` are transcribed straight
 from that guide — every field name and offset there comes from this thread. If
 you want to extend the overlay with new fields, that's the canonical reference.

@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent
 ICON_PNG = ROOT / "resources" / "icon.png"
 ICON_ICO = ROOT / "resources" / "icon.ico"
 RES_IMG_DIR = ROOT / "resources" / "img"
-ENTRYPOINT = ROOT / "src" / "overlay" / "__main__.py"
+ENTRYPOINT = ROOT / "src" / "live_telemetry_evo" / "__main__.py"
 DIST_DIR = ROOT / "dist"
 BUILD_DIR = ROOT / "build"
 

@@ -24,7 +24,7 @@ from PyInstaller.utils.hooks import collect_dynamic_libs
 # ``pyinstaller LiveTelemetryEvo.spec``, so ``Path.cwd()`` is the source root.
 ROOT = Path.cwd()
 PROJECT = "LiveTelemetryEvo"
-ENTRYPOINT = ROOT / "src" / "overlay" / "__main__.py"
+ENTRYPOINT = ROOT / "src" / "live_telemetry_evo" / "__main__.py"
 RES_DIR = ROOT / "resources"
 ICON_PNG = RES_DIR / "icon.png"
 ICON_ICO = RES_DIR / "icon.ico"
@@ -86,7 +86,7 @@ UNWANTED_BINARIES = (
     "Qt6OpenGL.dll", "Qt6OpenGLWidgets.dll",
     # QtNetwork only — Python's stdlib ssl module needs the
     # ``libcrypto-*.dll`` / ``libssl-*.dll`` pair too (used by
-    # ``overlay.updater`` for HTTPS to the GitHub releases API), so
+    # ``live_telemetry_evo.updater`` for HTTPS to the GitHub releases API), so
     # those substrings are no longer in this filter.
     "Qt6Network.dll",
     # PDF / SVG — both unused at runtime (fetch_icons.py uses QtSvg but

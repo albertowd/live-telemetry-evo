@@ -207,7 +207,7 @@ def _dispatch_frame(frame: TelemetryFrame, engine: EngineView,
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="overlay",
+        prog="live-telemetry-evo",
         description="Assetto Corsa telemetry overlay (AC1 / ACC / AC Evo / AC Rally)",
     )
     parser.add_argument(

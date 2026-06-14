@@ -29,7 +29,7 @@ The fields that are confirmed verbatim in the public sources are wired into
 :class:`TelemetryFrame`. Anything still uncertain is read defensively (with
 range clamps) so a wrong offset produces a visible-but-bounded value rather
 than a crash. Once the user runs the dump tool against a live session
-(``python -m overlay.sources.dump``) and confirms real offsets, this file is
+(``python -m live_telemetry_evo.sources.dump``) and confirms real offsets, this file is
 the only place that needs adjusting.
 """
 from __future__ import annotations

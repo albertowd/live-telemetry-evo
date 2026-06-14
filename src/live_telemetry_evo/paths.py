@@ -8,7 +8,7 @@ launched the app from — no hunting through ``%APPDATA%``.
 * **Frozen build (PyInstaller .exe)** — directory the ``.exe`` lives in
   (``Path(sys.executable).parent``). Stable regardless of how the user
   launched it (double-click, shortcut with custom "Start in", CLI).
-* **Dev (`python -m overlay`)** — current working directory, which is
+* **Dev (`python -m live_telemetry_evo`)** — current working directory, which is
   typically the repo root. ``positions.json`` and ``logs/`` will appear
   there during development; both are git-ignored.
 
