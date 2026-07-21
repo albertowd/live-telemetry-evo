@@ -27,28 +27,66 @@ _WS_EX_LAYERED = 0x00080000
 _WS_EX_TRANSPARENT = 0x00000020
 
 _WM_HOTKEY = 0x0312
-_MOD_ALT = 0x0001
+_ERROR_HOTKEY_ALREADY_REGISTERED = 1409
 _MOD_CONTROL = 0x0002
+_MOD_SHIFT = 0x0004
 _MOD_NOREPEAT = 0x4000
 _VK_C = 0x43
+_VK_D = 0x44
 _VK_L = 0x4C
+_VK_P = 0x50
 _VK_Q = 0x51
 _VK_R = 0x52
 _VK_S = 0x53
+_VK_W = 0x57
 
 # Hotkey IDs are app-scoped; any unique small ints work.
-_HK_ID_TOGGLE = 1
 _HK_ID_QUIT = 2
 _HK_ID_RESET = 3
 _HK_ID_SIZE = 4
 _HK_ID_LOG = 5
+_HK_ID_CLICK_THROUGH = 6
+_HK_ID_VR_PLACEMENT = 7
+_HK_ID_VR_SPREAD = 8
+_HK_ID_VR_DISTANCE = 9
 
 # Human-readable labels shown next to the matching tray-menu entries.
-HOTKEY_TOGGLE_LABEL = "Ctrl+Alt+L"
-HOTKEY_QUIT_LABEL = "Ctrl+Alt+Q"
-HOTKEY_RESET_LABEL = "Ctrl+Alt+R"
-HOTKEY_SIZE_LABEL = "Ctrl+Alt+S"
-HOTKEY_LOG_LABEL = "Ctrl+Alt+C"
+# Every global combo we hold is one an unrelated app can collide with, so
+# the set stays focused on the actions genuinely wanted without reaching for
+# the tray mid-session: logging (needed mid-lap), reset/quit (recovery paths
+# for when the overlay is in a state you cannot click your way out of),
+# click-through and size (the two layout tweaks you make while the game has
+# the foreground), plus VR placement/spread/distance — the panel geometry
+# you adjust from inside the headset, where the tray is unreachable entirely.
+#
+# Ctrl+Shift rather than Ctrl+Alt: the Ctrl+Alt space is heavily contested by
+# gaming peripherals and vendor overlays (NVIDIA's ShadowPlay alone holds
+# Ctrl+Alt+M there), which is exactly the software this overlay runs
+# alongside. Note the trade: a global hotkey is dispatched ahead of the
+# focused window, so while the overlay runs these combos are unavailable to
+# whatever app is in front — Ctrl+Shift+R will not reach a browser as
+# hard-reload, for instance.
+HOTKEY_LOG_LABEL = "Ctrl+Shift+L"
+HOTKEY_QUIT_LABEL = "Ctrl+Shift+Q"
+HOTKEY_RESET_LABEL = "Ctrl+Shift+R"
+HOTKEY_SIZE_LABEL = "Ctrl+Shift+S"
+HOTKEY_CLICK_LABEL = "Ctrl+Shift+C"
+HOTKEY_VR_PLACEMENT_LABEL = "Ctrl+Shift+P"
+HOTKEY_VR_SPREAD_LABEL = "Ctrl+Shift+W"
+HOTKEY_VR_DISTANCE_LABEL = "Ctrl+Shift+D"
+
+# (id, virtual-key, label) for each global hotkey. Registration is per-key:
+# one combo losing to another app must not take the others down with it.
+_HOTKEY_SPECS = (
+    (_HK_ID_LOG, _VK_L, HOTKEY_LOG_LABEL),
+    (_HK_ID_QUIT, _VK_Q, HOTKEY_QUIT_LABEL),
+    (_HK_ID_RESET, _VK_R, HOTKEY_RESET_LABEL),
+    (_HK_ID_SIZE, _VK_S, HOTKEY_SIZE_LABEL),
+    (_HK_ID_CLICK_THROUGH, _VK_C, HOTKEY_CLICK_LABEL),
+    (_HK_ID_VR_PLACEMENT, _VK_P, HOTKEY_VR_PLACEMENT_LABEL),
+    (_HK_ID_VR_SPREAD, _VK_W, HOTKEY_VR_SPREAD_LABEL),
+    (_HK_ID_VR_DISTANCE, _VK_D, HOTKEY_VR_DISTANCE_LABEL),
+)
 
 if sys.platform != "win32":
     raise OSError("Live Telemetry Evo is Windows-only")
@@ -155,18 +193,26 @@ class _HotkeyFilter(QAbstractNativeEventFilter):
 class OverlayWindow(QWidget):
     """Frameless, translucent, always-on-top window that hosts the chart.
 
-    Click-through is toggled with Ctrl+Alt+L. When enabled, mouse events pass
-    through to whatever is underneath (e.g. the game). When disabled, the
-    window can be dragged with the left mouse button.
+    Click-through is toggled from the tray (Windows -> Click-through). When
+    enabled, mouse events pass through to whatever is underneath (e.g. the
+    game). When disabled, the window can be dragged with the left mouse
+    button.
 
-    Emits ``reset_hotkey`` / ``size_hotkey`` when the corresponding Win32
-    global hotkey fires; ``app.py`` connects those to the layout-reset and
-    size-cycle handlers so the tray menu and the hotkeys share one path.
+    Emits one signal per Win32 global hotkey — ``reset_hotkey`` /
+    ``log_hotkey`` / ``size_hotkey`` / ``click_through_hotkey`` /
+    ``vr_placement_hotkey`` / ``vr_spread_hotkey`` / ``vr_distance_hotkey``
+    — when the matching combo fires; ``app.py`` connects each to the same
+    handler its tray-menu entry uses, so the menu and the hotkey share one
+    path.
     """
 
     reset_hotkey = Signal()
-    size_hotkey = Signal()
     log_hotkey = Signal()
+    size_hotkey = Signal()
+    click_through_hotkey = Signal()
+    vr_placement_hotkey = Signal()
+    vr_spread_hotkey = Signal()
+    vr_distance_hotkey = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -184,7 +230,10 @@ class OverlayWindow(QWidget):
 
         self._click_through = False
         self._drag_origin: QPoint | None = None
-        self._hotkeys_registered = False
+        # Ids that RegisterHotKey actually accepted — the ones to release on
+        # exit, and the ones to skip when retrying the rest on a later show.
+        self._registered_ids: set[int] = set()
+        self._last_hotkey_failures: tuple[tuple[str, int], ...] | None = None
 
         # Re-assert topmost periodically — once a second is enough to recover
         # within a frame or two when a game restores its foreground state.
@@ -197,11 +246,20 @@ class OverlayWindow(QWidget):
         # WS_EX_NOACTIVATE + Qt.WindowDoesNotAcceptFocus mean the overlay
         # never receives keyboard focus, so widget-scoped shortcuts never fire.
         self._hotkey_filter = _HotkeyFilter()
-        self._hotkey_filter.register(_HK_ID_TOGGLE, self.toggle_click_through)
         self._hotkey_filter.register(_HK_ID_QUIT, QApplication.quit)
         self._hotkey_filter.register(_HK_ID_RESET, self.reset_hotkey.emit)
-        self._hotkey_filter.register(_HK_ID_SIZE, self.size_hotkey.emit)
         self._hotkey_filter.register(_HK_ID_LOG, self.log_hotkey.emit)
+        self._hotkey_filter.register(_HK_ID_SIZE, self.size_hotkey.emit)
+        self._hotkey_filter.register(
+            _HK_ID_CLICK_THROUGH, self.click_through_hotkey.emit
+        )
+        self._hotkey_filter.register(
+            _HK_ID_VR_PLACEMENT, self.vr_placement_hotkey.emit
+        )
+        self._hotkey_filter.register(_HK_ID_VR_SPREAD, self.vr_spread_hotkey.emit)
+        self._hotkey_filter.register(
+            _HK_ID_VR_DISTANCE, self.vr_distance_hotkey.emit
+        )
         QApplication.instance().installNativeEventFilter(self._hotkey_filter)
 
         self.resize(640, 280)
@@ -224,29 +282,51 @@ class OverlayWindow(QWidget):
         # those up regardless of which window holds focus, and the hotkey
         # survives toggle_click_through recreating the native HWND.
         # MOD_NOREPEAT prevents auto-repeat when the user holds keys.
-        if self._hotkeys_registered:
-            return
-        mods = _MOD_CONTROL | _MOD_ALT | _MOD_NOREPEAT
-        ok_l = _RegisterHotKey(None, _HK_ID_TOGGLE, mods, _VK_L)
-        ok_q = _RegisterHotKey(None, _HK_ID_QUIT, mods, _VK_Q)
-        ok_r = _RegisterHotKey(None, _HK_ID_RESET, mods, _VK_R)
-        ok_s = _RegisterHotKey(None, _HK_ID_SIZE, mods, _VK_S)
-        ok_c = _RegisterHotKey(None, _HK_ID_LOG, mods, _VK_C)
-        if not (ok_l and ok_q and ok_r and ok_s and ok_c):
-            err = ctypes.get_last_error()
-            print(f"[overlay] RegisterHotKey failed (err={err}); "
-                  f"Ctrl+Alt+L/Q/R/S/C may not work", file=sys.stderr)
-        self._hotkeys_registered = True
+        # Each combo is registered independently and its error read straight
+        # after its own call — GetLastError is not cleared on success, so a
+        # single read after a batch reports a stale code from whichever call
+        # last failed, with no way to tell which combo actually lost.
+        mods = _MOD_CONTROL | _MOD_SHIFT | _MOD_NOREPEAT
+        failures: list[tuple[str, int]] = []
+        for hk_id, vk, label in _HOTKEY_SPECS:
+            if hk_id in self._registered_ids:
+                continue
+            ctypes.set_last_error(0)
+            if _RegisterHotKey(None, hk_id, mods, vk):
+                self._registered_ids.add(hk_id)
+            else:
+                failures.append((label, ctypes.get_last_error()))
+
+        # Only report when the outcome changes: this retries on every show
+        # (including each click-through toggle), so an unconditional print
+        # would spam the log with the same pre-existing conflict.
+        outcome = tuple(failures)
+        if outcome != self._last_hotkey_failures:
+            self._last_hotkey_failures = outcome
+            for label, err in failures:
+                hint = ""
+                # ASCII only: this goes to a Windows console that is often
+                # cp1252, where a non-encodable character raises
+                # UnicodeEncodeError and would take startup down with it.
+                if err == _ERROR_HOTKEY_ALREADY_REGISTERED:
+                    hint = (" - already held by another app, or by a leftover "
+                            "instance of this one (check Task Manager for a "
+                            "stray python.exe / LiveTelemetryEvo.exe)")
+                print(f"[overlay] hotkey {label} unavailable (err={err})"
+                      f"{hint}", file=sys.stderr)
+            if failures:
+                working = [lbl for hk_id, _vk, lbl in _HOTKEY_SPECS
+                           if hk_id in self._registered_ids]
+                print(f"[overlay] working hotkeys: "
+                      f"{', '.join(working) or 'none'}", file=sys.stderr)
 
     def _unregister_hotkeys(self) -> None:
-        if not self._hotkeys_registered:
-            return
-        _UnregisterHotKey(None, _HK_ID_TOGGLE)
-        _UnregisterHotKey(None, _HK_ID_QUIT)
-        _UnregisterHotKey(None, _HK_ID_RESET)
-        _UnregisterHotKey(None, _HK_ID_SIZE)
-        _UnregisterHotKey(None, _HK_ID_LOG)
-        self._hotkeys_registered = False
+        # Release only what we actually own; unregistering an id we never
+        # registered would fail harmlessly but muddies any error we do care
+        # about. Safe to call twice (aboutToQuit and closeEvent both fire it).
+        for hk_id in sorted(self._registered_ids):
+            _UnregisterHotKey(None, hk_id)
+        self._registered_ids.clear()
 
     def _reassert_topmost(self) -> None:
         # Skip while any popup (e.g. our tray context menu) is open. Popups

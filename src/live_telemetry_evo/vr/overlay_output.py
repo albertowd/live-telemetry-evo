@@ -86,13 +86,17 @@ HEAD_DOWN_M = 0.30     # head-locked: drop it slightly below eye line
 # flat-screen mapping puts the corner wheels out near the edge of the FOV,
 # which feels too wide in a headset; <1.0 compresses only the sideways
 # offset (vertical positions and widget sizes are untouched, and the
-# centred engine/inputs don't move). 1.0 == exact desktop layout.
+# centred engine/inputs don't move). 1.0 == exact desktop layout. This is
+# only the DEFAULT — the user tunes it live via the tray "VR spread"
+# submenu (see :meth:`VROverlayOutput.set_spread`).
 HORIZONTAL_SPREAD = 0.8
 # Widgets are placed on a vertical CYLINDER centred on the head rather than
 # a flat plane, so the panel wraps gently around the viewer and the corner
 # widgets turn to face inward instead of skewing away at the edge of
 # vision. The radius matches the head-locked viewing distance, so the
-# centre widget sits exactly where the flat plane used to.
+# centre widget sits exactly where the flat plane used to. This is only the
+# DEFAULT distance — the user tunes how far the panel floats live via the
+# tray "VR distance" submenu (see :meth:`VROverlayOutput.set_distance`).
 CYLINDER_RADIUS_M = HEAD_DISTANCE_M
 # Legacy seated-dashboard spot — only used as the "dash" fallback when the
 # HMD pose can't be sampled at activation (tracking not valid yet).
@@ -199,8 +203,15 @@ class VROverlayOutput:
     Lives on the UI thread; every openvr call is guarded so a missing
     runtime degrades to a no-op."""
 
-    def __init__(self, placement: str = "head") -> None:
+    def __init__(self, placement: str = "head",
+                 spread: float = HORIZONTAL_SPREAD,
+                 distance: float = CYLINDER_RADIUS_M) -> None:
         self._placement = placement if placement in ("head", "dash") else "head"
+        # Horizontal fan-out factor and cylinder radius (metres). Both are
+        # user-tunable live from the tray; changing either re-applies every
+        # overlay transform on the next submit via ``_placement_dirty``.
+        self._spread = float(spread)
+        self._distance = max(0.1, float(distance))
         self._ov = None        # IVROverlay
         self._system = None     # IVRSystem, for the system event queue
         self._running = False
@@ -237,6 +248,17 @@ class VROverlayOutput:
     def placement(self) -> str:
         """Current placement mode (``"head"`` / ``"dash"``)."""
         return self._placement
+
+    @property
+    def spread(self) -> float:
+        """Current horizontal fan-out factor (see ``HORIZONTAL_SPREAD``)."""
+        return self._spread
+
+    @property
+    def distance(self) -> float:
+        """Current distance the panel floats from the viewer, in metres
+        (the cylinder radius; see ``CYLINDER_RADIUS_M``)."""
+        return self._distance
 
     def display_hz(self) -> float:
         """The HMD's display refresh rate in Hz (e.g. 90.0 / 120.0), or
@@ -410,6 +432,21 @@ class VROverlayOutput:
         self._placement = mode
         self._placement_dirty = True
 
+    def set_spread(self, factor: float) -> None:
+        """Set the horizontal fan-out factor: how wide the widgets spread
+        sideways around the cylinder (1.0 == exact desktop layout, <1.0
+        pulls the corners toward centre). Re-applies every overlay
+        transform on the next submit, so the tray menu updates live."""
+        self._spread = float(factor)
+        self._placement_dirty = True
+
+    def set_distance(self, meters: float) -> None:
+        """Set how far the panel floats from the viewer — the cylinder
+        radius in metres. Larger pushes the whole HUD further away (and
+        makes it subtend a smaller angle). Re-applies on the next submit."""
+        self._distance = max(0.1, float(meters))
+        self._placement_dirty = True
+
     def _apply_transform(self, ov: _WidgetOverlay,
                          x: int, y: int, w: int, h: int,
                          screen_w: int, screen_h: int) -> None:
@@ -426,15 +463,15 @@ class VROverlayOutput:
         width_m = max(0.001, w * mpp)
         cx = x + w / 2.0
         cy = y + h / 2.0
+        radius = self._distance
         # Horizontal offset -> arc length -> angle on the cylinder.
-        arc = (cx - screen_w / 2.0) * mpp * HORIZONTAL_SPREAD
-        theta = arc / CYLINDER_RADIUS_M
+        arc = (cx - screen_w / 2.0) * mpp * self._spread
+        theta = arc / radius
         dy = -(cy - screen_h / 2.0) * mpp  # +up
         try:
             self._ov.setOverlayWidthInMeters(ov.handle, width_m)
             if self._placement == "dash":
-                offset = _cylinder_matrix(theta, -HEAD_DOWN_M + dy,
-                                          CYLINDER_RADIUS_M)
+                offset = _cylinder_matrix(theta, -HEAD_DOWN_M + dy, radius)
                 if self._dash_anchor is not None:
                     m = _mul_matrix(self._dash_anchor, offset)
                 else:
@@ -447,8 +484,7 @@ class VROverlayOutput:
                     ov.handle, openvr.TrackingUniverseSeated, m)
             else:
                 # Parented to the HMD: the cylinder wraps around the eyes.
-                m = _cylinder_matrix(theta, -HEAD_DOWN_M + dy,
-                                     CYLINDER_RADIUS_M)
+                m = _cylinder_matrix(theta, -HEAD_DOWN_M + dy, radius)
                 self._ov.setOverlayTransformTrackedDeviceRelative(
                     ov.handle, openvr.k_unTrackedDeviceIndex_Hmd, m)
         except Exception as exc:  # pylint: disable=broad-except

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from typing import Callable, Sequence
 
 from PySide6.QtCore import QThread, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
@@ -12,9 +13,10 @@ from .frame_bus import FrameBus
 from .layout import ScreenLayout, compute_layout, pick_resolution
 from .logger import CsvLogger
 from .settings import (delete_entries, load_polling_hz, load_positions,
-                        load_size_index, load_visibility, load_vr_placement,
-                        save_polling_hz, save_position, save_size_index,
-                        save_visibility, save_vr_placement)
+                        load_size_index, load_visibility, load_vr_distance,
+                        load_vr_placement, load_vr_spread, save_polling_hz,
+                        save_position, save_size_index, save_visibility,
+                        save_vr_distance, save_vr_placement, save_vr_spread)
 from .sources import make_source
 from .telemetry import TelemetryFrame
 from .tray import make_tray
@@ -26,8 +28,10 @@ from .widgets.detection import DetectionView
 from .widgets.engine_view import EngineView
 from .widgets.inputs_view import InputsView
 from .widgets.wheel_view import WheelView
-from .window import (HOTKEY_LOG_LABEL, HOTKEY_QUIT_LABEL, HOTKEY_RESET_LABEL,
-                     HOTKEY_SIZE_LABEL, HOTKEY_TOGGLE_LABEL, OverlayWindow)
+from .window import (HOTKEY_CLICK_LABEL, HOTKEY_LOG_LABEL, HOTKEY_QUIT_LABEL,
+                     HOTKEY_RESET_LABEL, HOTKEY_SIZE_LABEL,
+                     HOTKEY_VR_DISTANCE_LABEL, HOTKEY_VR_PLACEMENT_LABEL,
+                     HOTKEY_VR_SPREAD_LABEL, OverlayWindow)
 
 
 # Polling rates exposed in the tray submenu. The source's QTimer runs at
@@ -45,6 +49,31 @@ _RESETTABLE_IDS = ("engine", "inputs", "FL", "FR", "RL", "RR")
 SIZE_FACTORS: tuple[float, ...] = (0.5, 0.75, 1.0, 1.25, 1.5)
 SIZE_LABELS: tuple[str, ...] = ("XS", "S", "M", "L", "XL")
 DEFAULT_SIZE_INDEX = 2
+
+
+# VR panel geometry exposed in the tray. Spread is the horizontal fan-out
+# factor (1.0 == exact desktop layout); distance is how far the panel
+# floats from the viewer, in metres (the cylinder radius). Defaults mirror
+# HORIZONTAL_SPREAD / CYLINDER_RADIUS_M in vr.overlay_output.
+VR_SPREAD_OPTIONS: tuple[float, ...] = (0.4, 0.6, 0.8, 1.0, 1.2)
+DEFAULT_VR_SPREAD = 0.8
+VR_DISTANCE_OPTIONS: tuple[float, ...] = (1.0, 1.2, 1.4, 1.6, 1.8, 2.0)
+DEFAULT_VR_DISTANCE = 1.4
+
+# Placement modes the VR placement hotkey cycles through, in order. Keys
+# match the persisted values driving the tray placement submenu ("dash" is
+# the fixed-in-place mode, kept for settings backward-compatibility).
+VR_PLACEMENT_MODES: tuple[str, ...] = ("head", "dash")
+
+
+def _next_option(options: Sequence[float], current: float) -> float:
+    """Return the option after ``current`` (wrapping to the first), matched
+    with a float tolerance. Falls back to the first option when ``current``
+    is not in the list — e.g. a persisted value that is no longer offered."""
+    for i, opt in enumerate(options):
+        if abs(opt - current) < 1e-6:
+            return options[(i + 1) % len(options)]
+    return options[0]
 
 
 # Anchor corner per widget — kept stable across size cycles so a widget
@@ -120,7 +149,7 @@ def _apply_layout(
     _place("inputs", inputs, *_default_pos("inputs", layout))
     inputs.moved_to.connect(lambda x, y: save_position("inputs", x, y))
     inputs.closed.connect(lambda: (inputs.hide(), save_visibility("inputs", False)))
-    # Phase-3 widget hidden by default for now — Ctrl+Alt+R / tray Reset
+    # Phase-3 widget hidden by default for now — Ctrl+Shift+R / tray Reset
     # brings it back when the user wants to see it.
     inputs.hide()
 
@@ -326,7 +355,17 @@ def run(argv: list[str] | None = None) -> int:
             # Queued signal → worker thread mutates its own QTimer.
             src.hz_change_requested.emit(hz)
 
+    # Flips True once a game is detected and the source starts feeding the
+    # bus (``_start_source``). Guards logging and greys out the tray "Data"
+    # category until then — there is nothing to poll or log before a source
+    # is live, and a CSV started early would just capture empty frames.
+    game_detected = [False]
+
     def _toggle_logging() -> None:
+        # No source yet → nothing to log. The tray Data menu is greyed out
+        # in this state, but the global hotkey can still fire, so guard here.
+        if not game_detected[0]:
+            return
         if logger.is_active():
             logger.stop()
             print(f"[overlay] logging stopped (dropped rows: {bus.csv_dropped})")
@@ -337,21 +376,87 @@ def run(argv: list[str] | None = None) -> int:
     def _open_logs_folder() -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(CsvLogger.logs_dir())))
 
+    # Flips True once the countdown reveals the overlay widgets — the tray
+    # "Windows" category (reset / size / click-through) stays greyed out
+    # until then, since there are no placed widgets to act on during
+    # detection / countdown.
+    widgets_ready = [False]
+
     # Global hotkeys (registered in window.py via Win32 RegisterHotKey).
-    window.reset_hotkey.connect(_do_reset)
-    window.size_hotkey.connect(_cycle_size)
+    # Each signal shares its handler with the matching tray-menu entry, so
+    # firing the hotkey and clicking the menu take exactly one path — and
+    # each key is gated by the same readiness state that enables its menu
+    # entry, so a hotkey never acts while its menu item is greyed out.
+    # Reset / size / click-through act on the overlay widgets (Windows menu,
+    # ready once the countdown reveals them); logging guards on
+    # ``game_detected`` inside ``_toggle_logging`` (Data menu). Quit has no
+    # gate, matching its always-enabled menu entry.
+    def _when_widgets_ready(fn: Callable[[], None]) -> Callable[[], None]:
+        return lambda: fn() if widgets_ready[0] else None
+
+    window.reset_hotkey.connect(_when_widgets_ready(_do_reset))
     window.log_hotkey.connect(_toggle_logging)
+    window.size_hotkey.connect(_when_widgets_ready(_cycle_size))
+    window.click_through_hotkey.connect(
+        _when_widgets_ready(window.toggle_click_through)
+    )
+    # Release the Win32 hotkeys on every quit path. ``QApplication.quit()``
+    # (tray Quit, Ctrl+Shift+Q) exits the event loop without delivering a
+    # ``closeEvent``, so the window's own cleanup never runs — leaving the
+    # hotkeys registered to a thread that may linger as an orphaned process
+    # and blocking the next launch with ERROR_HOTKEY_ALREADY_REGISTERED (1409).
+    # pylint: disable-next=no-member
+    app.aboutToQuit.connect(window._unregister_hotkeys)
 
     # --- VR output: SteamVR overlay quad mirroring the HUD ------------
     # The overlay window's widgets are submitted to the OpenVR compositor
     # so they appear inside the headset (a desktop window is invisible in
     # VR). Started later per --vr / --novr / auto-detect; placement is
     # persisted and switchable from the tray submenu below.
-    vr = VROverlayOutput(placement=load_vr_placement())
+    vr = VROverlayOutput(
+        placement=load_vr_placement(),
+        spread=load_vr_spread(DEFAULT_VR_SPREAD, VR_SPREAD_OPTIONS),
+        distance=load_vr_distance(DEFAULT_VR_DISTANCE, VR_DISTANCE_OPTIONS),
+    )
 
     def _set_vr_placement(mode: str) -> None:
         save_vr_placement(mode)
         vr.set_placement(mode)
+
+    def _set_vr_spread(factor: float) -> None:
+        save_vr_spread(factor)
+        vr.set_spread(factor)
+
+    def _set_vr_distance(meters: float) -> None:
+        save_vr_distance(meters)
+        vr.set_distance(meters)
+
+    # --- VR hotkey cycle handlers -------------------------------------
+    # The tray VR submenus expose discrete choices; the global hotkeys step
+    # forward through them (wrapping) so the whole control is reachable from
+    # inside the headset, where the tray can't be clicked. Each routes back
+    # through the matching _set_vr_* above, so persistence and live-apply
+    # stay identical to picking the entry from the menu.
+    def _cycle_vr_placement() -> None:
+        cur = vr.placement
+        idx = VR_PLACEMENT_MODES.index(cur) if cur in VR_PLACEMENT_MODES else 0
+        _set_vr_placement(VR_PLACEMENT_MODES[(idx + 1) % len(VR_PLACEMENT_MODES)])
+
+    def _cycle_vr_spread() -> None:
+        _set_vr_spread(_next_option(VR_SPREAD_OPTIONS, vr.spread))
+
+    def _cycle_vr_distance() -> None:
+        _set_vr_distance(_next_option(VR_DISTANCE_OPTIONS, vr.distance))
+
+    # Gate the VR hotkeys on the same state that enables the tray VR
+    # category (is_vr_active == vr.is_running), so a key never acts while
+    # its menu entry is greyed out on the desktop overlay.
+    def _when_vr_active(fn: Callable[[], None]) -> Callable[[], None]:
+        return lambda: fn() if vr.is_running() else None
+
+    window.vr_placement_hotkey.connect(_when_vr_active(_cycle_vr_placement))
+    window.vr_spread_hotkey.connect(_when_vr_active(_cycle_vr_spread))
+    window.vr_distance_hotkey.connect(_when_vr_active(_cycle_vr_distance))
 
     # System-tray icon: reset / click-through / size submenu /
     # polling Hz submenu / quit. Held by ``window`` so it lives as long
@@ -374,16 +479,28 @@ def run(argv: list[str] | None = None) -> int:
         polling_hz_options=POLLING_HZ_OPTIONS,
         on_set_vr_placement=_set_vr_placement,
         current_vr_placement=lambda: vr.placement,
+        on_set_vr_spread=_set_vr_spread,
+        current_vr_spread=lambda: vr.spread,
+        vr_spread_options=VR_SPREAD_OPTIONS,
+        on_set_vr_distance=_set_vr_distance,
+        current_vr_distance=lambda: vr.distance,
+        vr_distance_options=VR_DISTANCE_OPTIONS,
+        is_vr_active=vr.is_running,
+        is_windows_ready=lambda: widgets_ready[0],
+        is_game_detected=lambda: game_detected[0],
         on_toggle_logging=_toggle_logging,
         is_logging=logger.is_active,
         on_open_logs_folder=_open_logs_folder,
         on_quit=app.quit,
         updater=window._updater,
         reset_shortcut=HOTKEY_RESET_LABEL,
-        click_through_shortcut=HOTKEY_TOGGLE_LABEL,
-        size_shortcut=HOTKEY_SIZE_LABEL,
         quit_shortcut=HOTKEY_QUIT_LABEL,
         logging_shortcut=HOTKEY_LOG_LABEL,
+        size_shortcut=HOTKEY_SIZE_LABEL,
+        click_through_shortcut=HOTKEY_CLICK_LABEL,
+        vr_placement_shortcut=HOTKEY_VR_PLACEMENT_LABEL,
+        vr_spread_shortcut=HOTKEY_VR_SPREAD_LABEL,
+        vr_distance_shortcut=HOTKEY_VR_DISTANCE_LABEL,
     )
 
     def _on_update_downloaded(tag: str, path: str) -> None:
@@ -427,6 +544,7 @@ def run(argv: list[str] | None = None) -> int:
     countdown.raise_()  # ensure it sits above any pre-shown chrome
 
     def _reveal_widgets() -> None:
+        widgets_ready[0] = True
         if visibility.get("engine", True):
             engine.show()
         # Inputs widget stays hidden after the countdown — see _apply_layout.
@@ -438,6 +556,9 @@ def run(argv: list[str] | None = None) -> int:
 
     def _start_source(name: str) -> None:
         current_source_name[0] = name
+        # A game is now detected: unlock the tray Data category and let the
+        # logging hotkey through (see ``_toggle_logging`` / the tray guard).
+        game_detected[0] = True
         # Build the source on the UI thread but with no parent — Qt
         # forbids moveToThread on a parented object. Wire the bus before
         # the thread starts; ``set_bus`` is plain Python so the worker
@@ -492,7 +613,7 @@ def run(argv: list[str] | None = None) -> int:
 
     window.show()
     # Default to click-through ON: a full-screen overlay must not steal mouse
-    # input from the game underneath. User can toggle with Ctrl+Alt+L.
+    # input from the game underneath. Toggle from the tray (Windows menu).
     window.toggle_click_through()
 
     if args.source == "auto":

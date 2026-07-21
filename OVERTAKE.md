@@ -160,13 +160,19 @@ One widget per corner. The inner face of the tire always points toward the scree
 Hotkeys are registered globally with Win32 [COLOR=rgb(44, 130, 201)]RegisterHotKey[/COLOR], so they fire even while the game has focus:
 
 [LIST]
-[*][B]Ctrl+Alt+L[/B] — toggle click-through (lock / unlock the overlay for repositioning).
-[*][B]Ctrl+Alt+R[/B] — reset every widget to its default position and visibility.
-[*][B]Ctrl+Alt+S[/B] — cycle widget size (XS → S → M → L → XL → XS …). The chosen size persists.
-[*][B]Ctrl+Alt+Q[/B] — quit the overlay.
+[*][B]Ctrl+Shift+R[/B] — reset every widget to its default position and visibility.
+[*][B]Ctrl+Shift+C[/B] — toggle click-through (lock / unlock the overlay for dragging).
+[*][B]Ctrl+Shift+S[/B] — cycle widget size (XS → S → M → L → XL, wraps).
+[*][B]Ctrl+Shift+L[/B] — start / stop CSV logging of every telemetry frame.
+[*][B]Ctrl+Shift+P[/B] — VR: toggle placement (Head-locked ↔ Fixed in place).
+[*][B]Ctrl+Shift+W[/B] — VR: cycle panel spread / width (wraps).
+[*][B]Ctrl+Shift+D[/B] — VR: cycle panel distance (wraps).
+[*][B]Ctrl+Shift+Q[/B] — quit the overlay.
 [/LIST]
 
-A system-tray icon mirrors the same options (reset positions, click-through toggle, size submenu, quit) with the hotkey shown next to each label, plus three new sections:
+Each hotkey shares one path with its tray-menu entry and is gated the same way — a key does nothing while its menu item is greyed out. Reset / click-through / size wait until the widgets are placed; logging waits until a game is detected; the VR keys act only while rendering into a headset; quit is always available. Every global combo the overlay holds is one another application can collide with (the VR keys in particular overlap common browser shortcuts). If one is already claimed on your machine, the overlay reports which one and the rest keep working — use the tray menu for the affected action.
+
+A system-tray icon carries the same controls, grouped into three categories — [B]Data[/B] (Polling Hz, logging), [B]VR[/B] (placement, spread, distance) and [B]Windows[/B] (reset, click-through, size) — with the hotkey shown next to those that have one. Each category greys out until it can do something (a game detected, a headset live, the widgets placed). A few entries worth calling out:
 
 [LIST]
 [*][B]Polling Hz[/B] submenu — 30 / 60 / 100 / 120 / 144 / 250 Hz. Drives the shared-memory poll rate (and CSV row rate when logging is active). UI repaint runs independently at the monitor refresh rate, so faster polling never makes the widgets paint more often than your display can show. The choice is persisted.
@@ -184,13 +190,13 @@ On launch the overlay asynchronously asks GitHub for the latest release. If a ne
 [*]The old [COLOR=rgb(44, 130, 201)].exe[/COLOR] is left in place so you can always go back to a prior version by double-clicking it. Uninstalling is the same single-file delete it always was.
 [/LIST]
 
-When the overlay is unlocked (click-through OFF), drag any widget to move it, or click its [B]×[/B] to hide it. Both states persist across sessions. If you hide everything, [B]Ctrl+Alt+R[/B] brings the layout back.
+When the overlay is unlocked (click-through OFF), drag any widget to move it, or click its [B]×[/B] to hide it. Both states persist across sessions. If you hide everything, [B]Ctrl+Shift+R[/B] brings the layout back.
 
 [B]Click-through is ON by default[/B] so the overlay never steals mouse input from the game.
 
 [SIZE=5][B]Resolutions[/B][/SIZE]
 
-The overlay picks a screen multiplier from the vertical resolution of your main monitor and combines it with your chosen size factor ([B]Ctrl+Alt+S[/B]):
+The overlay picks a screen multiplier from the vertical resolution of your main monitor and combines it with your chosen size factor ([B]Ctrl+Shift+S[/B], or tray → [B]Windows[/B] → [B]Size[/B]):
 
 [LIST]
 [*]XS — 0.50 ×
@@ -215,7 +221,7 @@ This release ships as a [B]single Windows executable[/B]. There is no Content Ma
 [*]Put it anywhere — Desktop, Documents, a sim-racing tools folder, your choice.
 [*]Start any supported Assetto Corsa title (AC1, ACC, AC Evo, or AC Rally) and load a session.
 [*]Double-click the executable. A [I]Detecting AC Environment…[/I] screen stays up until the overlay finds the game; once it attaches, a 5-second countdown plays showing the detected game name above the digit, then the widgets reveal.
-[*]Use [B]Ctrl+Alt+L[/B] to unlock for repositioning, then drag widgets where you want them.
+[*]Press [B]Ctrl+Shift+C[/B] (or right-click the tray icon → [B]Windows[/B] → [B]Click-through[/B]) to unlock for repositioning, then drag widgets where you want them.
 [/LIST]
 
 To uninstall, just delete the [COLOR=rgb(44, 130, 201)].exe[/COLOR] and the [COLOR=rgb(44, 130, 201)]positions.json[/COLOR] / [COLOR=rgb(44, 130, 201)]logs\[/COLOR] sitting next to it.

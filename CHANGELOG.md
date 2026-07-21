@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-07-21
+
+### Added
+- Global hotkeys `Ctrl+Shift+C` (toggle click-through) and `Ctrl+Shift+S` (cycle widget size `XS → S → M → L → XL`, wrapping).
+- Global VR hotkeys `Ctrl+Shift+P` (placement toggle), `Ctrl+Shift+W` (spread) and `Ctrl+Shift+D` (distance); each cycles its tray submenu.
+
+### Changed
+- Hotkeys moved from `Ctrl+Alt` to `Ctrl+Shift` (less contested by gaming peripherals and vendor overlays); logging is now `Ctrl+Shift+L`.
+- Full global hotkey set: `Ctrl+Shift` + `R` reset, `C` click-through, `S` size, `L` logging, `P`/`W`/`D` VR placement/spread/distance, `Q` quit.
+- Each hotkey is inert while its tray entry is greyed: reset/size/click-through need widgets placed, logging a detected game, VR keys a live headset.
+- Tray **Data** category (Polling Hz, logging, Open logs folder) and `Ctrl+Shift+L` stay disabled until a game is detected and telemetry flows.
+
+### Fixed
+- Global hotkeys are released on every quit path, not just `closeEvent` (skipped by `QApplication.quit()`), avoiding err 1409 on the next launch.
+- Hotkeys register per-combo with failures attributed individually, so one `GetLastError()` no longer misreports a single conflict as total failure.
+
 ## [0.7.0] - 2026-06-11
 
 ### Added
@@ -116,6 +132,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
+[0.7.1]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.0...v0.6.5

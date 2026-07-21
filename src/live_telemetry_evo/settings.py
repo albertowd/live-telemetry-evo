@@ -150,3 +150,40 @@ def save_vr_placement(mode: str) -> None:
     data = _read()
     data["vr_placement"] = str(mode)
     _write(data)
+
+
+def _load_vr_float(key: str, default: float, allowed: tuple[float, ...]) -> float:
+    """Return the persisted VR ``key`` snapped to the nearest ``allowed``
+    value, or ``default`` when the entry is missing or not a number. Snapping
+    (rather than exact match) keeps the tray radio button in sync even if a
+    stored value drifts slightly through the JSON round-trip."""
+    val = _read().get(key)
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return min(allowed, key=lambda a: abs(a - float(val)))
+    return default
+
+
+def load_vr_spread(default: float = 0.8,
+                   allowed: tuple[float, ...] = (0.4, 0.6, 0.8, 1.0, 1.2)) -> float:
+    """Return the persisted VR horizontal spread factor, snapped to one of
+    ``allowed``."""
+    return _load_vr_float("vr_spread", default, allowed)
+
+
+def save_vr_spread(factor: float) -> None:
+    data = _read()
+    data["vr_spread"] = float(factor)
+    _write(data)
+
+
+def load_vr_distance(default: float = 1.4,
+                     allowed: tuple[float, ...] = (1.0, 1.2, 1.4, 1.6, 1.8, 2.0)) -> float:
+    """Return the persisted VR panel distance in metres, snapped to one of
+    ``allowed``."""
+    return _load_vr_float("vr_distance", default, allowed)
+
+
+def save_vr_distance(meters: float) -> None:
+    data = _read()
+    data["vr_distance"] = float(meters)
+    _write(data)
