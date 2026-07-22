@@ -164,7 +164,8 @@ def _load_vr_float(key: str, default: float, allowed: tuple[float, ...]) -> floa
 
 
 def load_vr_spread(default: float = 0.8,
-                   allowed: tuple[float, ...] = (0.4, 0.6, 0.8, 1.0, 1.2)) -> float:
+                   allowed: tuple[float, ...] = (
+                       0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2)) -> float:
     """Return the persisted VR horizontal spread factor, snapped to one of
     ``allowed``."""
     return _load_vr_float("vr_spread", default, allowed)

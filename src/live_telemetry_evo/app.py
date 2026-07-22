@@ -55,7 +55,8 @@ DEFAULT_SIZE_INDEX = 2
 # factor (1.0 == exact desktop layout); distance is how far the panel
 # floats from the viewer, in metres (the cylinder radius). Defaults mirror
 # HORIZONTAL_SPREAD / CYLINDER_RADIUS_M in vr.overlay_output.
-VR_SPREAD_OPTIONS: tuple[float, ...] = (0.4, 0.6, 0.8, 1.0, 1.2)
+VR_SPREAD_OPTIONS: tuple[float, ...] = (
+    0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2)
 DEFAULT_VR_SPREAD = 0.8
 VR_DISTANCE_OPTIONS: tuple[float, ...] = (1.0, 1.2, 1.4, 1.6, 1.8, 2.0)
 DEFAULT_VR_DISTANCE = 1.4
