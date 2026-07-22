@@ -281,11 +281,18 @@ def make_tray(
         # desktop overlay so it doesn't imply an effect it can't have. The
         # persisted choices are still applied the moment VR does start.
         vr_menu.menuAction().setEnabled(is_vr_active())
-        # The Windows controls act on the overlay widgets, which aren't
-        # placed until the source is detected and the countdown reveals
-        # them — grey the category out until then so reset/size/click-
-        # through can't fire against widgets that don't exist yet.
-        windows_menu.menuAction().setEnabled(is_windows_ready())
+        # The Windows controls act on the on-screen overlay widgets, which
+        # aren't placed until the source is detected and the countdown
+        # reveals them — grey the category out until then so reset/size/
+        # click-through can't fire against widgets that don't exist yet.
+        # Windows and VR are also mutually exclusive: once VR starts the
+        # desktop overlay is blanked (fully transparent) and the HUD lives
+        # in the headset, tuned through the VR category — so the desktop-
+        # oriented Windows controls act on a surface the user can't see.
+        # Grey Windows out whenever VR is live (mirrors VR being greyed out
+        # on the desktop overlay above).
+        windows_menu.menuAction().setEnabled(
+            is_windows_ready() and not is_vr_active())
         # Polling Hz / logging only do anything once the source is live —
         # grey the Data category out until a game is detected so logging
         # can't be started against a source that isn't feeding frames yet.

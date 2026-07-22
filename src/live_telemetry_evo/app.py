@@ -392,8 +392,13 @@ def run(argv: list[str] | None = None) -> int:
     # ready once the countdown reveals them); logging guards on
     # ``game_detected`` inside ``_toggle_logging`` (Data menu). Quit has no
     # gate, matching its always-enabled menu entry.
+    #
+    # The Windows keys are also gated on VR being off, so they mirror the
+    # tray Windows category being greyed out while VR is live (``vr`` is
+    # bound further down but only read when a key actually fires, so the
+    # forward reference is fine).
     def _when_widgets_ready(fn: Callable[[], None]) -> Callable[[], None]:
-        return lambda: fn() if widgets_ready[0] else None
+        return lambda: fn() if widgets_ready[0] and not vr.is_running() else None
 
     window.reset_hotkey.connect(_when_widgets_ready(_do_reset))
     window.log_hotkey.connect(_toggle_logging)
