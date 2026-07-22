@@ -144,6 +144,20 @@ def acpmf_tag_present() -> bool:
     return _tag_exists("Local\\acpmf_static")
 
 
+def acc_process_present() -> bool:
+    """Public helper: is an ACC process actually running (including the
+    Unreal-Engine shipping binary it may share with AC Rally)?
+
+    The ACC fallback in :class:`DetectionView` fires when the ``acpmf_*``
+    tag is up but the physics block is zero-filled (menu / paused), which
+    can't tell ACC from AC Rally. Gating that fallback on a live ACC
+    process stops a *stale* ``acpmf_*`` mapping — left behind by a crashed
+    game or held open by another tool (SimHub, Content Manager, …) — from
+    being mistaken for a running ACC when nothing is actually up.
+    """
+    return is_process_running(_ACC_PROCESS_NAMES)
+
+
 def is_process_running(names: tuple[str, ...]) -> bool:
     """Return True if any process whose EXE basename matches one of
     ``names`` (case-insensitive, substring match) is currently running.
@@ -235,4 +249,5 @@ def detect_running_game() -> str | None:  # pylint: disable=too-many-return-stat
     return None
 
 
-__all__ = ["detect_running_game", "acpmf_tag_present", "is_process_running"]
+__all__ = ["detect_running_game", "acpmf_tag_present", "acc_process_present",
+           "is_process_running"]
