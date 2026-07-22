@@ -132,9 +132,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
-[0.7.1]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.7.0...v0.7.1
-[0.7.0]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.6...v0.7.0
-[0.6.6]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.5...v0.6.6
-[0.6.5]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.0...v0.6.5
-[0.6.0]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/albertowd/live-telemetry-ac-evo/releases/tag/v0.5.0
+[0.7.1]: https://github.com/albertowd/live-telemetry-evo/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.6...v0.7.0
+[0.6.6]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.5...v0.6.6
+[0.6.5]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.0...v0.6.5
+[0.6.0]: https://github.com/albertowd/live-telemetry-evo/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/albertowd/live-telemetry-evo/releases/tag/v0.5.0
