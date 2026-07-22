@@ -233,6 +233,15 @@ def detect_running_game() -> str | None:  # pylint: disable=too-many-return-stat
         return "acrally"
     if any(p in procs for p in _AC1_PROCESS_NAMES):
         return "ac1"
+    # From here only the shared ACC / AC-Rally shipping binary is left to
+    # identify by physics content. Require that binary to actually be
+    # running first: the acpmf_* mapping — and the last physics frame the
+    # game wrote into it — can linger after the game exits or be held open
+    # by another tool (Content Manager, SimHub). Without this gate a stale
+    # tyreCoreTemp still sitting in a plausible Celsius range reads as a
+    # live ACC when nothing is running. See acc_process_present().
+    if not any(any(n in p for n in _ACC_PROCESS_NAMES) for p in procs):
+        return None
     # ACC and AC Rally sometimes ship under the same Unreal Engine
     # shipping binary, so process hints can't always tell them apart.
     # Peek at tyreCoreTemp[0]: Kelvin (≈ 290–360) → AC Rally, plausible
