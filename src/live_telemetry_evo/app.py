@@ -9,9 +9,9 @@ from PySide6.QtCore import QThread, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from .action_log import log_action
 from .frame_bus import FrameBus
 from .layout import ScreenLayout, compute_layout, pick_resolution
+from .logbook import log, log_action
 from .logger import CsvLogger
 from .settings import (delete_entries, load_polling_hz, load_positions,
                         load_size_index, load_visibility, load_vr_distance,
@@ -422,11 +422,11 @@ def run(argv: list[str] | None = None) -> int:
             return
         if logger.is_active():
             logger.stop()
-            print(f"[overlay] logging stopped (dropped rows: {bus.csv_dropped})")
+            log(f"[overlay] logging stopped (dropped rows: {bus.csv_dropped})")
             log_action(f"logging stopped (dropped rows: {bus.csv_dropped})")
         else:
             path = logger.start(current_source_name[0])
-            print(f"[overlay] logging started: {path}")
+            log(f"[overlay] logging started: {path}")
             log_action(f"logging started: {path.name}")
 
     def _open_logs_folder() -> None:
@@ -692,7 +692,7 @@ def run(argv: list[str] | None = None) -> int:
         if not vr.is_running():
             repaint_timer.start()
 
-        print(
+        log(
             f"[overlay] source={name} polling_hz={polling_hz} "
             f"repaint_hz={refresh_hz:.0f} "
             f"screen={geom.width()}x{geom.height()} "
@@ -765,7 +765,7 @@ def run(argv: list[str] | None = None) -> int:
             vr_submit_timer.setInterval(interval * 2)
             vr_tick_ema_ms[0] = 0.0
             pump_ms, composite_ms, upload_ms = vr.phase_ms
-            print(f"[overlay] VR tick costs {ema:.1f} ms "
+            log(f"[overlay] VR tick costs {ema:.1f} ms "
                   f"(dispatch {(t1 - t0) * 1000:.1f} + "
                   f"grab {(t2 - t1) * 1000:.1f} + pump {pump_ms:.1f} + "
                   f"composite {composite_ms:.1f} + upload {upload_ms:.1f}); "
@@ -788,7 +788,7 @@ def run(argv: list[str] | None = None) -> int:
         vr_submit_timer.setInterval(max(1, round(1000 / hmd_hz)))
         vr_tick_ema_ms[0] = 0.0
         repaint_timer.stop()
-        print(f"[overlay] VR refresh: {hmd_hz:.0f} Hz")
+        log(f"[overlay] VR refresh: {hmd_hz:.0f} Hz")
         # Hide the × buttons — the grab would bake them into the headset
         # quad, and there is no pointer in VR to click them.
         for view in (engine, inputs, *wheels.values()):
@@ -812,7 +812,7 @@ def run(argv: list[str] | None = None) -> int:
 
     if vr_mode == "force":
         if not _enable_vr():
-            print("[overlay] VR requested but unavailable; "
+            log("[overlay] VR requested but unavailable; "
                   "staying on desktop overlay")
     elif vr_mode == "auto" and VROverlayOutput.available():
         # Poll for a live SteamVR session; flip into VR on first detection,
@@ -824,7 +824,7 @@ def run(argv: list[str] | None = None) -> int:
             if vr_detect.vr_active():
                 vr_detect_timer.stop()
                 if _enable_vr():
-                    print("[overlay] SteamVR detected; VR overlay enabled")
+                    log("[overlay] SteamVR detected; VR overlay enabled")
 
         # pylint: disable-next=no-member
         vr_detect_timer.timeout.connect(_vr_detect_tick)

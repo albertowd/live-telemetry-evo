@@ -73,6 +73,8 @@ import time
 from PySide6.QtGui import QImage, QOffscreenSurface, QOpenGLContext
 from PySide6.QtOpenGL import QOpenGLTexture
 
+from ..logbook import log
+
 try:
     import openvr  # type: ignore
     _IMPORT_ERROR: str | None = None
@@ -321,21 +323,21 @@ class VROverlayOutput:
         if self._running:
             return True
         if openvr is None:
-            print(f"[overlay] VR unavailable: openvr import failed ({_IMPORT_ERROR})")
+            log(f"[overlay] VR unavailable: openvr import failed ({_IMPORT_ERROR})")
             return False
         try:
             openvr.init(openvr.VRApplication_Overlay)
             self._system = openvr.VRSystem()
             self._ov = openvr.VROverlay()
         except Exception as exc:  # pylint: disable=broad-except
-            print(f"[overlay] VR overlay init failed: {exc}")
+            log(f"[overlay] VR overlay init failed: {exc}")
             self._safe_shutdown()
             return False
         self._init_gl()
         self._placement_dirty = True
         self._running = True
         mode = "gl" if self._gl_ctx is not None else "raw"
-        print(f"[overlay] VR overlay started "
+        log(f"[overlay] VR overlay started "
               f"(placement={self._placement}, submit={mode})")
         return True
 
@@ -358,7 +360,7 @@ class VROverlayOutput:
             if not ctx.makeCurrent(surface):
                 raise RuntimeError("makeCurrent failed")
         except Exception as exc:  # pylint: disable=broad-except
-            print(f"[overlay] VR GL init failed ({exc}); "
+            log(f"[overlay] VR GL init failed ({exc}); "
                   f"falling back to raw uploads")
             self._gl_ctx = None
             self._gl_surface = None
@@ -386,7 +388,7 @@ class VROverlayOutput:
                 ctypes.c_void_p)
             self._gl_tex_sub_image = proto(addr)
         except Exception as exc:  # pylint: disable=broad-except
-            print(f"[overlay] VR glTexSubImage2D unavailable ({exc}); "
+            log(f"[overlay] VR glTexSubImage2D unavailable ({exc}); "
                   f"textures will resize per widget size")
             self._gl_tex_sub_image = None
 
@@ -424,7 +426,7 @@ class VROverlayOutput:
             # bounds (verified in the headset).
             self._apply_texture_bounds(ov)
         except Exception as exc:  # pylint: disable=broad-except
-            print(f"[overlay] VR overlay create failed ({key}): "
+            log(f"[overlay] VR overlay create failed ({key}): "
                   f"{type(exc).__name__}: {exc}")
             ov.handle = None
             return None
@@ -478,7 +480,7 @@ class VROverlayOutput:
             self._ov.setOverlayTextureBounds(ov.handle, bounds)
         except Exception as exc:  # pylint: disable=broad-except
             # Worst case the HUD shows flipped; never block startup on it.
-            print(f"[overlay] VR texture bounds update failed: {exc}")
+            log(f"[overlay] VR texture bounds update failed: {exc}")
 
     def stop(self) -> None:
         """Destroy all overlays and shut OpenVR down. Idempotent."""
@@ -486,7 +488,7 @@ class VROverlayOutput:
             return
         self._safe_shutdown()
         self._running = False
-        print("[overlay] VR overlay stopped")
+        log("[overlay] VR overlay stopped")
 
     def _safe_shutdown(self) -> None:
         # Destroy GL textures first while the context is still current.
@@ -579,7 +581,7 @@ class VROverlayOutput:
         centred content, since the compositor ignores sub-rect texture
         bounds and always maps the whole texture onto the quad."""
         mpp = WIDTH_M / screen_w           # metres per screen pixel
-        maxw, maxh = self._max_sizes.get(ov.key, (w, h))
+        maxw, _ = self._max_sizes.get(ov.key, (w, h))
         width_m = max(0.001, maxw * mpp)
         # Centre the (max-sized) quad on the widget's on-screen centre.
         cx = x + w / 2.0
@@ -609,7 +611,7 @@ class VROverlayOutput:
                 self._ov.setOverlayTransformTrackedDeviceRelative(
                     ov.handle, openvr.k_unTrackedDeviceIndex_Hmd, m)
         except Exception as exc:  # pylint: disable=broad-except
-            print(f"[overlay] VR placement update failed ({ov.key}): {exc}")
+            log(f"[overlay] VR placement update failed ({ov.key}): {exc}")
             return
         ov.rect = (x, y, w, h)
 
@@ -678,7 +680,7 @@ class VROverlayOutput:
                 # reads as clipped/stretched — flag it so the mismatch is
                 # visible instead of silently wrong.
                 if (image.width(), image.height()) != (w, h):
-                    print(f"[overlay] VR size mismatch {key}: "
+                    log(f"[overlay] VR size mismatch {key}: "
                           f"geometry {w}x{h} vs image "
                           f"{image.width()}x{image.height()}")
                 self._apply_transform(ov, x, y, w, h, screen_w, screen_h)
@@ -846,7 +848,7 @@ class VROverlayOutput:
         detail = f"{name}: {exc}" if str(exc) else name
         if detail != self._last_error:
             self._last_error = detail
-            print(f"[overlay] VR submit failed ({w}x{h}): {detail}")
+            log(f"[overlay] VR submit failed ({w}x{h}): {detail}")
         # With the event queues pumped this should essentially never
         # happen; a sustained streak means something is genuinely
         # wedged, so try fresh handles as a last resort.
@@ -860,7 +862,7 @@ class VROverlayOutput:
         self._fail_streak = 0
         if self._last_error != "ok":
             self._last_error = "ok"
-            print(f"[overlay] VR submit ok ({w}x{h})")
+            log(f"[overlay] VR submit ok ({w}x{h})")
 
     # --- event pump / wedge recovery ---------------------------------------
     def _pump_events(self) -> None:
@@ -888,7 +890,7 @@ class VROverlayOutput:
         """Destroy every overlay quad to unwedge the compositor's
         raw-upload path; the next submit rebuilds them lazily. Throttled by
         the caller."""
-        print("[overlay] VR overlays wedged; recreating")
+        log("[overlay] VR overlays wedged; recreating")
         for ov in self._overlays.values():
             self._destroy_overlay(ov)
         # Drop all per-widget state; submit_widgets recreates on demand.

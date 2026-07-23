@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QAbstractNativeEventFilter, QPoint, QTimer, Signa
 from PySide6.QtGui import QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
-from .action_log import log_action
+from .logbook import log, log_action
 
 
 # --- Win32 helpers for topmost reassertion ----------------------------------
@@ -314,13 +314,13 @@ class OverlayWindow(QWidget):
                     hint = (" - already held by another app, or by a leftover "
                             "instance of this one (check Task Manager for a "
                             "stray python.exe / LiveTelemetryEvo.exe)")
-                print(f"[overlay] hotkey {label} unavailable (err={err})"
-                      f"{hint}", file=sys.stderr)
+                log(f"[overlay] hotkey {label} unavailable (err={err})"
+                    f"{hint}")
             if failures:
                 working = [lbl for hk_id, _vk, lbl in _HOTKEY_SPECS
                            if hk_id in self._registered_ids]
-                print(f"[overlay] working hotkeys: "
-                      f"{', '.join(working) or 'none'}", file=sys.stderr)
+                log(f"[overlay] working hotkeys: "
+                    f"{', '.join(working) or 'none'}")
 
     def _unregister_hotkeys(self) -> None:
         # Release only what we actually own; unregistering an id we never

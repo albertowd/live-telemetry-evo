@@ -5,7 +5,7 @@ from typing import Callable, Sequence
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidget
 
-from .action_log import log_action
+from .logbook import log_action
 from .resources import app_icon_path
 from .updater import UpdateController
 

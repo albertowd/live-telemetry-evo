@@ -34,13 +34,13 @@ Quirks vs ACC, observed empirically:
 from __future__ import annotations
 
 import math
-import sys
 from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer
 
 from ..interpolation import (Curve, DEFAULT_BRAKE_TEMP_CURVE,
                               DEFAULT_TIRE_TEMP_CURVE)
+from ..logbook import log
 from ..telemetry import TelemetryFrame, WHEEL_IDS
 from ._win32_mapping import NamedMapping
 from .acc import (_SPageFilePhysics, _SPageFileGraphic, _SPageFileStatic,
@@ -147,11 +147,11 @@ class AcRallyTelemetrySource(TelemetrySource):
         try:
             self._reader.open()
             self._apply_static(self._reader.read_static())
-            print("[acrally] connected to shared memory")
+            log("[acrally] connected to shared memory")
             return True
         except (OSError, RuntimeError) as exc:
             if not isinstance(exc, FileNotFoundError):
-                print(f"[acrally] connect failed: {exc}", file=sys.stderr)
+                log(f"[acrally] connect failed: {exc}")
             return False
 
     def _tick(self) -> None:
@@ -168,8 +168,7 @@ class AcRallyTelemetrySource(TelemetrySource):
             phys = self._reader.read_physics()
             graphics = self._reader.read_graphics()
         except (OSError, ValueError) as exc:
-            print(f"[acrally] read failed, dropping connection: {exc}",
-                  file=sys.stderr)
+            log(f"[acrally] read failed, dropping connection: {exc}")
             self._reader.close()
             return
 
