@@ -392,19 +392,25 @@ def run(argv: list[str] | None = None) -> int:
     # ready once the countdown reveals them); logging guards on
     # ``game_detected`` inside ``_toggle_logging`` (Data menu). Quit has no
     # gate, matching its always-enabled menu entry.
-    #
-    # The Windows keys are also gated on VR being off, so they mirror the
-    # tray Windows category being greyed out while VR is live (``vr`` is
-    # bound further down but only read when a key actually fires, so the
-    # forward reference is fine).
     def _when_widgets_ready(fn: Callable[[], None]) -> Callable[[], None]:
+        return lambda: fn() if widgets_ready[0] else None
+
+    # Reset / click-through are desktop-only: reset re-lays the on-screen
+    # windows and click-through toggles a desktop-window flag, neither of
+    # which the user can act on from inside the headset — so they're also
+    # gated on VR being off, mirroring the greyed-out tray Windows category.
+    # Size is the exception: it scales the HUD in VR too (bigger widgets ->
+    # bigger grabbed texture -> bigger quad), so it stays available in both
+    # modes and only needs the widgets-ready gate. (``vr`` is bound further
+    # down but only read when a key fires, so the forward reference is fine.)
+    def _when_desktop_widgets_ready(fn: Callable[[], None]) -> Callable[[], None]:
         return lambda: fn() if widgets_ready[0] and not vr.is_running() else None
 
-    window.reset_hotkey.connect(_when_widgets_ready(_do_reset))
+    window.reset_hotkey.connect(_when_desktop_widgets_ready(_do_reset))
     window.log_hotkey.connect(_toggle_logging)
     window.size_hotkey.connect(_when_widgets_ready(_cycle_size))
     window.click_through_hotkey.connect(
-        _when_widgets_ready(window.toggle_click_through)
+        _when_desktop_widgets_ready(window.toggle_click_through)
     )
     # Release the Win32 hotkeys on every quit path. ``QApplication.quit()``
     # (tray Quit, Ctrl+Shift+Q) exits the event loop without delivering a

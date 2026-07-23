@@ -193,6 +193,24 @@ def make_tray(
         a.triggered.connect(lambda _checked, d=meters: on_set_vr_distance(d))
         distance_actions.append((meters, a))
 
+    # Size submenu (VR): the same widget-size cycle offered under Windows,
+    # duplicated here because it scales the HUD in the headset too (bigger
+    # widgets grab a bigger texture -> a bigger quad). Reset / click-through
+    # stay desktop-only, but size is meaningful in both modes, so it lives
+    # in both menus and shares one handler / hotkey. Enabled with the VR
+    # category (only bites while the HUD renders into a headset).
+    vr_size_menu = vr_menu.addMenu(_with_shortcut("Size", size_shortcut))
+    vr_size_group = QActionGroup(vr_size_menu)
+    vr_size_group.setExclusive(True)
+    vr_size_actions: list[QAction] = []
+    for idx, label in enumerate(size_labels):
+        a = QAction(label, vr_size_menu)
+        a.setCheckable(True)
+        vr_size_group.addAction(a)
+        vr_size_menu.addAction(a)
+        a.triggered.connect(lambda _checked, i=idx: on_set_size(i))
+        vr_size_actions.append(a)
+
     # ---- Windows: on-screen overlay widget layout ------------------------
     windows_menu = menu.addMenu("Windows")
 
@@ -273,6 +291,9 @@ def make_tray(
         cur = current_size_index()
         for i, a in enumerate(size_actions):
             a.setChecked(i == cur)
+        # VR Size submenu mirrors the same current index (shared handler).
+        for i, a in enumerate(vr_size_actions):
+            a.setChecked(i == cur)
         cur_hz = current_polling_hz()
         for hz, a in hz_actions:
             a.setChecked(hz == cur_hz)
@@ -288,9 +309,11 @@ def make_tray(
         # Windows and VR are also mutually exclusive: once VR starts the
         # desktop overlay is blanked (fully transparent) and the HUD lives
         # in the headset, tuned through the VR category — so the desktop-
-        # oriented Windows controls act on a surface the user can't see.
-        # Grey Windows out whenever VR is live (mirrors VR being greyed out
-        # on the desktop overlay above).
+        # oriented Windows controls (reset / click-through) act on a surface
+        # the user can't see. Grey Windows out whenever VR is live (mirrors
+        # VR being greyed out on the desktop overlay above). Size is the one
+        # widget control that still matters in VR, so it's duplicated in the
+        # VR category above rather than left stranded in this greyed-out one.
         windows_menu.menuAction().setEnabled(
             is_windows_ready() and not is_vr_active())
         # Polling Hz / logging only do anything once the source is live —
