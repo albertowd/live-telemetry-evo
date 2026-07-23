@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt, QAbstractNativeEventFilter, QPoint, QTimer, Signa
 from PySide6.QtGui import QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
+from .action_log import log_action
+
 
 # --- Win32 helpers for topmost reassertion ----------------------------------
 # Qt's WindowStaysOnTopHint sets WS_EX_TOPMOST on creation, but a fullscreen
@@ -349,6 +351,7 @@ class OverlayWindow(QWidget):
         self.setWindowFlags(self.windowFlags())
         self.show()
         _force_topmost(int(self.winId()))
+        log_action(f"click-through {'on' if self._click_through else 'off'}")
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton and not self._click_through:

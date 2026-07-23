@@ -9,6 +9,7 @@ from PySide6.QtCore import QThread, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
+from .action_log import log_action
 from .frame_bus import FrameBus
 from .layout import ScreenLayout, compute_layout, pick_resolution
 from .logger import CsvLogger
@@ -152,16 +153,24 @@ def _apply_layout(
         view.setGeometry(x, y, w, h)
 
     _place("engine", engine, *_default_pos("engine", layout))
-    engine.moved_to.connect(lambda x, y: save_position("engine", x, y))
-    engine.closed.connect(lambda: (engine.hide(), save_visibility("engine", False)))
+    engine.moved_to.connect(lambda x, y: (
+        save_position("engine", x, y),
+        log_action(f"widget engine moved to ({x}, {y})")))
+    engine.closed.connect(lambda: (
+        engine.hide(), save_visibility("engine", False),
+        log_action("widget engine closed")))
     if visibility.get("engine", True):
         engine.show()
     else:
         engine.hide()
 
     _place("inputs", inputs, *_default_pos("inputs", layout))
-    inputs.moved_to.connect(lambda x, y: save_position("inputs", x, y))
-    inputs.closed.connect(lambda: (inputs.hide(), save_visibility("inputs", False)))
+    inputs.moved_to.connect(lambda x, y: (
+        save_position("inputs", x, y),
+        log_action(f"widget inputs moved to ({x}, {y})")))
+    inputs.closed.connect(lambda: (
+        inputs.hide(), save_visibility("inputs", False),
+        log_action("widget inputs closed")))
     # Phase-3 widget hidden by default for now — Ctrl+Shift+R / tray Reset
     # brings it back when the user wants to see it.
     inputs.hide()
@@ -170,9 +179,12 @@ def _apply_layout(
         _place(wid, view, *_default_pos(wid, layout))
         # Default-arg trick binds the loop variable into each lambda;
         # otherwise all four would close over the last value of `wid`.
-        view.moved_to.connect(lambda x, y, k=wid: save_position(k, x, y))
-        view.closed.connect(lambda v=view, k=wid:
-                            (v.hide(), save_visibility(k, False)))
+        view.moved_to.connect(lambda x, y, k=wid: (
+            save_position(k, x, y),
+            log_action(f"widget {k} moved to ({x}, {y})")))
+        view.closed.connect(lambda v=view, k=wid: (
+            v.hide(), save_visibility(k, False),
+            log_action(f"widget {k} closed")))
         if visibility.get(wid, True):
             view.show()
         else:
@@ -292,6 +304,11 @@ def run(argv: list[str] | None = None) -> int:
     app.setOrganizationName("LiveTelemetryEvo")
     app.setApplicationName("Overlay")
 
+    # Marker so the appended action log separates one run from the next.
+    log_action("session started")
+    # pylint: disable-next=no-member
+    app.aboutToQuit.connect(lambda: log_action("session ended"))
+
     screen = app.primaryScreen()
     geom = screen.availableGeometry()
 
@@ -318,12 +335,14 @@ def run(argv: list[str] | None = None) -> int:
         new_mult = base_mult * SIZE_FACTORS[idx]
         layout = compute_layout(geom.width(), geom.height(), multiplier=new_mult)
         _resize_widgets(engine, inputs, wheels, layout)
+        log_action(f"size -> {SIZE_LABELS[idx]}")
 
     def _cycle_size() -> None:
         _set_size((size_idx + 1) % len(SIZE_FACTORS))
 
     def _do_reset() -> None:
         _reset_layout(engine, inputs, wheels, layout)
+        log_action("reset positions")
 
     # Per-widget show/hide, driven by the tray Windows/VR "Widgets" submenus.
     # One visibility flag backs both menus and the desktop and headset views:
@@ -338,6 +357,7 @@ def run(argv: list[str] | None = None) -> int:
             return
         view.setVisible(visible)
         save_visibility(key, visible)
+        log_action(f"widget {key} {'shown' if visible else 'hidden'}")
 
     def _is_widget_visible(key: str) -> bool:
         view = _all_views.get(key)
@@ -383,6 +403,7 @@ def run(argv: list[str] | None = None) -> int:
             return
         polling_hz = hz
         save_polling_hz(hz)
+        log_action(f"polling {hz} Hz")
         src = getattr(window, "_source", None)
         if src is not None:
             # Queued signal → worker thread mutates its own QTimer.
@@ -402,11 +423,14 @@ def run(argv: list[str] | None = None) -> int:
         if logger.is_active():
             logger.stop()
             print(f"[overlay] logging stopped (dropped rows: {bus.csv_dropped})")
+            log_action(f"logging stopped (dropped rows: {bus.csv_dropped})")
         else:
             path = logger.start(current_source_name[0])
             print(f"[overlay] logging started: {path}")
+            log_action(f"logging started: {path.name}")
 
     def _open_logs_folder() -> None:
+        log_action("open logs folder")
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(CsvLogger.logs_dir())))
 
     # Flips True once the countdown reveals the overlay widgets — the tray
@@ -479,14 +503,17 @@ def run(argv: list[str] | None = None) -> int:
     def _set_vr_placement(mode: str) -> None:
         save_vr_placement(mode)
         vr.set_placement(mode)
+        log_action(f"VR placement -> {mode}")
 
     def _set_vr_spread(factor: float) -> None:
         save_vr_spread(factor)
         vr.set_spread(factor)
+        log_action(f"VR spread -> {round(factor * 100)}%")
 
     def _set_vr_distance(meters: float) -> None:
         save_vr_distance(meters)
         vr.set_distance(meters)
+        log_action(f"VR distance -> {meters:.1f} m")
 
     # --- VR hotkey cycle handlers -------------------------------------
     # The tray VR submenus expose discrete choices; the global hotkeys step
