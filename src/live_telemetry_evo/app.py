@@ -415,19 +415,33 @@ def run(argv: list[str] | None = None) -> int:
     # is live, and a CSV started early would just capture empty frames.
     game_detected = [False]
 
+    def _stop_logging() -> None:
+        """Stop CSV logging and log the saved file's absolute path so the
+        terminal makes it clickable. No-op when not logging — so it's safe
+        to call from both the toggle and the quit-shutdown path."""
+        if not logger.is_active():
+            return
+        # Grab the path before stop(); it survives stop() but read it up
+        # front to be safe. Absolute (logs_dir is resolved), so terminals
+        # render it as a clickable link.
+        path = logger.current_path()
+        logger.stop()
+        saved = f"; saved {path}" if path is not None else ""
+        msg = f"logging stopped (dropped rows: {bus.csv_dropped}){saved}"
+        log(f"[overlay] {msg}")
+        log_action(msg)
+
     def _toggle_logging() -> None:
         # No source yet → nothing to log. The tray Data menu is greyed out
         # in this state, but the global hotkey can still fire, so guard here.
         if not game_detected[0]:
             return
         if logger.is_active():
-            logger.stop()
-            log(f"[overlay] logging stopped (dropped rows: {bus.csv_dropped})")
-            log_action(f"logging stopped (dropped rows: {bus.csv_dropped})")
+            _stop_logging()
         else:
             path = logger.start(current_source_name[0])
             log(f"[overlay] logging started: {path}")
-            log_action(f"logging started: {path.name}")
+            log_action(f"logging started: {path}")
 
     def _open_logs_folder() -> None:
         log_action("open logs folder")
@@ -673,7 +687,9 @@ def run(argv: list[str] | None = None) -> int:
         # ("QObject::killTimer: Timers cannot be stopped from another
         # thread").
         def _shutdown() -> None:
-            logger.stop()
+            # Logs the saved CSV path if logging was active; plain no-op
+            # otherwise (still stops the logger).
+            _stop_logging()
             if thread.isRunning():
                 source.stop_requested.emit()
                 thread.quit()
