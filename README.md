@@ -253,37 +253,41 @@ it to open a menu organised into three categories — **Data**, **VR**, **Window
 — followed by the update and quit entries. Each category greys out until it can
 actually do something (the same gating the hotkeys follow, above).
 
+Within every menu the entries are ordered alphabetically by label; the
+value-scale submenus (Polling Hz, Distance, Spread, Size) keep their natural
+numeric / scale order.
+
 **Data** — enabled once a game is detected and telemetry is flowing:
 
+- **Open logs folder** — opens the directory holding the CSV files
+  alongside the executable.
 - **Polling Hz** — submenu with `30 / 60 / 100 / 120 / 144 / 250` Hz as a
   radio group; controls the shared-memory poll rate and the CSV row rate.
 - **Start logging / Stop logging** — toggles CSV capture of every
   telemetry frame (raw + calculated) to `logs/<timestamp>_<source>.csv`.
-- **Open logs folder** — opens the directory holding the CSV files
-  alongside the executable.
 
 **VR** — enabled only while the HUD is being rendered into a headset:
 
-- **Placement** — submenu (`Head-locked` / `Fixed in place` radio group) for
+- **Distance** — submenu of distances (`1.0 … 2.0 m`); how far the whole panel
+  floats from the viewer (the cylinder radius).
+- **Placement** — submenu (`Fixed in place` / `Head-locked` radio group) for
   where the HUD quad floats in the headset. Persists; updates the live overlay
   without a restart. Re-selecting *Fixed in place* re-anchors the panel at your
   current gaze.
+- **Size** — the same `XS / S / M / L / XL` radio group as under **Windows**;
+  scaling the HUD applies in the headset too.
 - **Spread** — submenu of width factors (`40% … 120%`); how wide the widgets
   fan out sideways around the cylinder (lower pulls the corner widgets toward
   the centre of view).
-- **Distance** — submenu of distances (`1.0 … 2.0 m`); how far the whole panel
-  floats from the viewer (the cylinder radius).
-- **Size** — the same `XS / S / M / L / XL` radio group as under **Windows**;
-  scaling the HUD applies in the headset too.
 - **Widgets** — submenu with a checkable entry per panel (Engine, Inputs, and
   the four wheels) to show or hide each one; the choice persists.
 
 **Windows** — enabled once the widgets are placed (after the countdown):
 
+- **Click-through** — checkable; reflects current state.
 - **Reset positions** — restores the default layout. The **Inputs** widget is
   hidden by default, so reset restores its position but leaves it hidden — use
   **Widgets** to bring it up.
-- **Click-through** — checkable; reflects current state.
 - **Size** — submenu with `XS / S / M / L / XL` as a radio group.
 - **Widgets** — the same per-panel show/hide toggles as under **VR** (one set
   of flags backs both menus and the desktop and headset views).

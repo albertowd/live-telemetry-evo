@@ -45,13 +45,13 @@ DEFAULT_POLLING_HZ = 60
 _RESETTABLE_IDS = ("engine", "inputs", "FL", "FR", "RL", "RR")
 
 # (widget key, human label) for the per-widget show/hide toggles offered in
-# the tray's Windows and VR menus. Order sets the menu order. Keys match the
-# visibility-persistence ids and the ``all_views`` map built in ``run``.
+# the tray's Windows and VR menus. Order sets the menu order — alphabetical by
+# label. Keys match the visibility-persistence ids and the ``all_views`` map.
 WIDGET_TOGGLES: tuple[tuple[str, str], ...] = (
     ("engine", "Engine"),
-    ("inputs", "Inputs"),
     ("FL", "Front Left"),
     ("FR", "Front Right"),
+    ("inputs", "Inputs"),
     ("RL", "Rear Left"),
     ("RR", "Rear Right"),
 )

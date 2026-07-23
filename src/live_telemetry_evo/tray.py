@@ -71,9 +71,12 @@ def make_tray(
 ) -> QSystemTrayIcon | None:
     """Build the notification-area icon and its context menu.
 
-    Menu layout: three category submenus — Data (Polling Hz / logging),
-    VR (Placement / Spread / Distance), Windows (Reset / Click-through /
-    Size) — then Check for Updates and Quit.
+    Menu layout: three category submenus — Data (Open logs folder /
+    Polling Hz / logging), VR (Distance / Placement / Size / Spread /
+    Widgets), Windows (Click-through / Reset positions / Size / Widgets) —
+    then Check for Updates and Quit. Entries within each menu are ordered
+    alphabetically by label; value-scale submenus (Polling Hz, Distance,
+    Spread, Size) keep their natural numeric / scale order.
     The ``*_shortcut`` strings are display-only hints (e.g. 'Ctrl+Shift+R')
     appended to the action text — actual key handling is done via
     Win32 ``RegisterHotKey`` in :class:`OverlayWindow` because the
@@ -123,9 +126,15 @@ def make_tray(
     # source starts.
     data_menu = menu.addMenu("Data")
 
+    # Entries are ordered alphabetically by label: Open logs folder, Polling
+    # Hz, Start/Stop logging.
+    open_logs_action = QAction("Open logs folder", data_menu)
+    open_logs_action.triggered.connect(lambda _checked: on_open_logs_folder())
+    data_menu.addAction(open_logs_action)
+
     # Polling-Hz submenu: drives the SHM poll cadence (and, once logging is
     # enabled, the CSV row rate). Independent from the UI repaint timer,
-    # which runs at the display refresh rate.
+    # which runs at the display refresh rate. Values stay in numeric order.
     hz_menu = data_menu.addMenu("Polling Hz")
     hz_group = QActionGroup(hz_menu)
     hz_group.setExclusive(True)
@@ -138,8 +147,6 @@ def make_tray(
         a.triggered.connect(lambda _checked, h=hz: on_set_polling_hz(h))
         hz_actions.append((hz, a))
 
-    data_menu.addSeparator()
-
     # CSV logging — single toggle action whose text flips between
     # "Start logging" / "Stop logging" based on current state.
     logging_action = QAction(
@@ -147,10 +154,6 @@ def make_tray(
     )
     logging_action.triggered.connect(lambda _checked: on_toggle_logging())
     data_menu.addAction(logging_action)
-
-    open_logs_action = QAction("Open logs folder", data_menu)
-    open_logs_action.triggered.connect(lambda _checked: on_open_logs_folder())
-    data_menu.addAction(open_logs_action)
 
     # ---- VR: headset panel placement / geometry --------------------------
     # Every control here only bites while the HUD is being rendered into a
@@ -160,44 +163,9 @@ def make_tray(
     # Distance) belongs to the global hotkey that *cycles* forward through
     # that submenu's entries — the tray can't be reached from inside VR.
     vr_menu = menu.addMenu("VR")
-
-    # Placement submenu: where the HUD quad floats in the headset. Head-
-    # locked follows the gaze; fixed freezes the quad in the play space
-    # right where it currently floats (re-selecting re-anchors at the
-    # current gaze).
-    placement_menu = vr_menu.addMenu(
-        _with_shortcut("Placement", vr_placement_shortcut)
-    )
-    vr_group = QActionGroup(placement_menu)
-    vr_group.setExclusive(True)
-    # (internal mode, human label) — mode strings match VROverlayOutput;
-    # "dash" is kept as the persisted key for the fixed mode for backward
-    # compatibility with existing settings files.
-    _vr_modes = (("head", "Head-locked"), ("dash", "Fixed in place"))
-    vr_actions: list[tuple[str, QAction]] = []
-    for mode, label in _vr_modes:
-        a = QAction(label, placement_menu)
-        a.setCheckable(True)
-        vr_group.addAction(a)
-        placement_menu.addAction(a)
-        a.triggered.connect(lambda _checked, m=mode: on_set_vr_placement(m))
-        vr_actions.append((mode, a))
-
-    # Spread submenu: how wide the widgets fan out sideways around the
-    # cylinder. 100% is the exact desktop layout; lower pulls the corner
-    # widgets toward the centre of view (they can otherwise sit near the
-    # edge of the FOV in a headset). Radio-button behaviour like Size.
-    spread_menu = vr_menu.addMenu(_with_shortcut("Spread", vr_spread_shortcut))
-    spread_group = QActionGroup(spread_menu)
-    spread_group.setExclusive(True)
-    spread_actions: list[tuple[float, QAction]] = []
-    for factor in vr_spread_options:
-        a = QAction(f"{round(factor * 100)}%", spread_menu)
-        a.setCheckable(True)
-        spread_group.addAction(a)
-        spread_menu.addAction(a)
-        a.triggered.connect(lambda _checked, f=factor: on_set_vr_spread(f))
-        spread_actions.append((factor, a))
+    # Submenus are ordered alphabetically by title: Distance, Placement,
+    # Size, Spread, Widgets. Their value lists (Distance / Spread / Size)
+    # stay in natural numeric / scale order.
 
     # Distance submenu: how far the whole panel floats from the viewer
     # (the cylinder radius). Larger pushes the HUD further away.
@@ -214,6 +182,28 @@ def make_tray(
         distance_menu.addAction(a)
         a.triggered.connect(lambda _checked, d=meters: on_set_vr_distance(d))
         distance_actions.append((meters, a))
+
+    # Placement submenu: where the HUD quad floats in the headset. Head-
+    # locked follows the gaze; fixed freezes the quad in the play space
+    # right where it currently floats (re-selecting re-anchors at the
+    # current gaze).
+    placement_menu = vr_menu.addMenu(
+        _with_shortcut("Placement", vr_placement_shortcut)
+    )
+    vr_group = QActionGroup(placement_menu)
+    vr_group.setExclusive(True)
+    # (internal mode, human label), alphabetical by label — mode strings
+    # match VROverlayOutput; "dash" is kept as the persisted key for the
+    # fixed mode for backward compatibility with existing settings files.
+    _vr_modes = (("dash", "Fixed in place"), ("head", "Head-locked"))
+    vr_actions: list[tuple[str, QAction]] = []
+    for mode, label in _vr_modes:
+        a = QAction(label, placement_menu)
+        a.setCheckable(True)
+        vr_group.addAction(a)
+        placement_menu.addAction(a)
+        a.triggered.connect(lambda _checked, m=mode: on_set_vr_placement(m))
+        vr_actions.append((mode, a))
 
     # Size submenu (VR): the same widget-size cycle offered under Windows,
     # duplicated here because it scales the HUD in the headset too (bigger
@@ -233,19 +223,31 @@ def make_tray(
         a.triggered.connect(lambda _checked, i=idx: on_set_size(i))
         vr_size_actions.append(a)
 
+    # Spread submenu: how wide the widgets fan out sideways around the
+    # cylinder. 100% is the exact desktop layout; lower pulls the corner
+    # widgets toward the centre of view (they can otherwise sit near the
+    # edge of the FOV in a headset). Radio-button behaviour like Size.
+    spread_menu = vr_menu.addMenu(_with_shortcut("Spread", vr_spread_shortcut))
+    spread_group = QActionGroup(spread_menu)
+    spread_group.setExclusive(True)
+    spread_actions: list[tuple[float, QAction]] = []
+    for factor in vr_spread_options:
+        a = QAction(f"{round(factor * 100)}%", spread_menu)
+        a.setCheckable(True)
+        spread_group.addAction(a)
+        spread_menu.addAction(a)
+        a.triggered.connect(lambda _checked, f=factor: on_set_vr_spread(f))
+        spread_actions.append((factor, a))
+
     # Per-widget show/hide, so individual panels can be dropped from the
     # headset HUD. Shares the same actions (and visibility flags) as the
     # Windows "Widgets" submenu below.
     _add_widgets_submenu(vr_menu)
 
     # ---- Windows: on-screen overlay widget layout ------------------------
+    # Entries are ordered alphabetically by label: Click-through, Reset
+    # positions, Size, Widgets (Size values stay in scale order).
     windows_menu = menu.addMenu("Windows")
-
-    reset_action = QAction(
-        _with_shortcut("Reset positions", reset_shortcut), windows_menu
-    )
-    reset_action.triggered.connect(on_reset)
-    windows_menu.addAction(reset_action)
 
     click_through_action = QAction(
         _with_shortcut("Click-through", click_through_shortcut), windows_menu
@@ -256,6 +258,12 @@ def make_tray(
     # truth so a toggle from anywhere stays in lockstep with the menu.
     click_through_action.triggered.connect(lambda _checked: on_toggle_click_through())
     windows_menu.addAction(click_through_action)
+
+    reset_action = QAction(
+        _with_shortcut("Reset positions", reset_shortcut), windows_menu
+    )
+    reset_action.triggered.connect(on_reset)
+    windows_menu.addAction(reset_action)
 
     # The hint sits on the submenu title because the global hotkey *cycles*
     # through these entries rather than selecting one — it advances to the
