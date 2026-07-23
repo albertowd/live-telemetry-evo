@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import time
 from typing import Callable, Sequence
@@ -850,6 +851,22 @@ def run(argv: list[str] | None = None) -> int:
     # Keep references on the window so the QObjects survive past run()'s scope.
     window._vr = vr
     window._vr_submit_timer = vr_submit_timer
+
+    # Ctrl+C in a console (dev runs / run.bat) should shut down as gracefully
+    # as the tray Quit and Ctrl+Shift+Q paths: route SIGINT through
+    # app.quit() so ``aboutToQuit`` fires — flushing/closing the CSV log,
+    # releasing the global hotkeys and stopping the VR overlay — instead of
+    # the interpreter's default hard KeyboardInterrupt. A 200 ms idle timer
+    # keeps the Python interpreter ticking so the pending signal is actually
+    # delivered while Qt's C++ event loop is running (otherwise Ctrl+C can
+    # sit unhandled until the next Python callback). The windowed .exe has no
+    # console, so this is a no-op there.
+    signal.signal(signal.SIGINT, lambda *_args: app.quit())
+    sigint_timer = QTimer(window)
+    sigint_timer.setInterval(200)
+    # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
+    sigint_timer.timeout.connect(lambda: None)
+    sigint_timer.start()
 
     return app.exec()
 
