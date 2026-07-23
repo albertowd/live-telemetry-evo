@@ -490,6 +490,14 @@ class VROverlayOutput:
         except Exception as exc:  # pylint: disable=broad-except
             print(f"[overlay] VR placement update failed ({ov.key}): {exc}")
             return
+        # Diagnostic (fires only on a size/placement change, not per frame):
+        # surfaces the pixel rect and the derived quad geometry so a "content
+        # clipped at the panel edge" report can be traced to whichever number
+        # is off — texture size, quad metres, or angle.
+        height_m = h * mpp
+        print(f"[overlay] VR place {ov.key}: rect={w}x{h}@({x},{y}) "
+              f"screen={screen_w}x{screen_h} -> quad {width_m:.3f}x{height_m:.3f} m "
+              f"theta={math.degrees(theta):.1f} dy={dy:.3f}")
         ov.rect = (x, y, w, h)
 
     def _hmd_pose(self):
@@ -551,6 +559,15 @@ class VROverlayOutput:
             if ov is None:
                 continue
             if reapply or ov.rect != (x, y, w, h):
+                # The quad is sized from the geometry (w, h) but textured
+                # from the grabbed image. If those disagree, the compositor
+                # maps a full-texture quad onto the wrong aspect and content
+                # reads as clipped/stretched — flag it so the mismatch is
+                # visible instead of silently wrong.
+                if (image.width(), image.height()) != (w, h):
+                    print(f"[overlay] VR size mismatch {key}: "
+                          f"geometry {w}x{h} vs image "
+                          f"{image.width()}x{image.height()}")
                 self._apply_transform(ov, x, y, w, h, screen_w, screen_h)
             # The texture upload wants tightly-packed RGBA8888 (stride ==
             # w*4); convert the grab once if it came back in another format.
