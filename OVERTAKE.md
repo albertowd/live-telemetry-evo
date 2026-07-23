@@ -172,7 +172,7 @@ Hotkeys are registered globally with Win32 [COLOR=rgb(44, 130, 201)]RegisterHotK
 
 Each hotkey shares one path with its tray-menu entry and is gated the same way — a key does nothing while its menu item is greyed out. Reset / click-through / size wait until the widgets are placed; logging waits until a game is detected; the VR keys act only while rendering into a headset; quit is always available. Every global combo the overlay holds is one another application can collide with (the VR keys in particular overlap common browser shortcuts). If one is already claimed on your machine, the overlay reports which one and the rest keep working — use the tray menu for the affected action.
 
-A system-tray icon carries the same controls, grouped into three categories — [B]Data[/B] (Polling Hz, logging), [B]VR[/B] (placement, spread, distance) and [B]Windows[/B] (reset, click-through, size) — with the hotkey shown next to those that have one. Each category greys out until it can do something (a game detected, a headset live, the widgets placed). A few entries worth calling out:
+A system-tray icon carries the same controls, grouped into three categories — [B]Data[/B] (Polling Hz, logging), [B]VR[/B] (placement, spread, distance, size, widgets) and [B]Windows[/B] (reset, click-through, size, widgets) — with the hotkey shown next to those that have one. Each category greys out until it can do something (a game detected, a headset live, the widgets placed). Both [B]VR[/B] and [B]Windows[/B] carry a [B]Widgets[/B] submenu that shows or hides each panel (engine, inputs, and the four wheels) individually, on the desktop and in the headset alike. A few entries worth calling out:
 
 [LIST]
 [*][B]Polling Hz[/B] submenu — 30 / 60 / 100 / 120 / 144 / 250 Hz. Drives the shared-memory poll rate (and CSV row rate when logging is active). UI repaint runs independently at the monitor refresh rate, so faster polling never makes the widgets paint more often than your display can show. The choice is persisted.
@@ -190,7 +190,7 @@ On launch the overlay asynchronously asks GitHub for the latest release. If a ne
 [*]The old [COLOR=rgb(44, 130, 201)].exe[/COLOR] is left in place so you can always go back to a prior version by double-clicking it. Uninstalling is the same single-file delete it always was.
 [/LIST]
 
-When the overlay is unlocked (click-through OFF), drag any widget to move it, or click its [B]×[/B] to hide it. Both states persist across sessions. If you hide everything, [B]Ctrl+Shift+R[/B] brings the layout back.
+When the overlay is unlocked (click-through OFF), drag any widget to move it, or click its [B]×[/B] to hide it. Both states persist across sessions. Bring a hidden panel back from the tray [B]Widgets[/B] submenu (under [B]Windows[/B] or [B]VR[/B]), or press [B]Ctrl+Shift+R[/B] to restore the default layout.
 
 [B]Click-through is ON by default[/B] so the overlay never steals mouse input from the game.
 

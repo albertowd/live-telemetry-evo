@@ -273,12 +273,20 @@ actually do something (the same gating the hotkeys follow, above).
   the centre of view).
 - **Distance** — submenu of distances (`1.0 … 2.0 m`); how far the whole panel
   floats from the viewer (the cylinder radius).
+- **Size** — the same `XS / S / M / L / XL` radio group as under **Windows**;
+  scaling the HUD applies in the headset too.
+- **Widgets** — submenu with a checkable entry per panel (Engine, Inputs, and
+  the four wheels) to show or hide each one; the choice persists.
 
 **Windows** — enabled once the widgets are placed (after the countdown):
 
-- **Reset positions** — restores the default layout.
+- **Reset positions** — restores the default layout. The **Inputs** widget is
+  hidden by default, so reset restores its position but leaves it hidden — use
+  **Widgets** to bring it up.
 - **Click-through** — checkable; reflects current state.
 - **Size** — submenu with `XS / S / M / L / XL` as a radio group.
+- **Widgets** — the same per-panel show/hide toggles as under **VR** (one set
+  of flags backs both menus and the desktop and headset views).
 
 Then, always available:
 
@@ -353,7 +361,9 @@ whole layout back.
   detection-screen font size so the two screens flow as one. The source still
   feeds frames during the countdown so values are live the moment the widgets
   appear.
-- Widgets you hid in a previous session stay hidden; `Ctrl+Shift+R` brings them back.
+- Widgets you hid in a previous session stay hidden; the tray **Widgets** submenu
+  (under **Windows** or **VR**) toggles any panel back, and `Ctrl+Shift+R` restores
+  the default layout (the **Inputs** widget stays hidden — show it from **Widgets**).
 
 ---
 

@@ -4,19 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.7.1] - 2026-07-21
+## [0.7.1] - 2026-07-23
 
 ### Added
+- Per-widget show/hide: a **Widgets** submenu in the tray **VR** and **Windows** menus toggles each panel (engine, inputs, four wheels); persisted.
+- VR widgets wrap around the viewer on a **cylinder** — the corner panels turn to face inward — instead of sitting on a flat plane.
+- Tray **VR** submenus **Spread** (sideways fan-out) and **Distance** (panel distance), plus **Size** in VR — each persisted, applied live.
 - Global hotkeys `Ctrl+Shift+C` (toggle click-through) and `Ctrl+Shift+S` (cycle widget size `XS → S → M → L → XL`, wrapping).
 - Global VR hotkeys `Ctrl+Shift+P` (placement toggle), `Ctrl+Shift+W` (spread) and `Ctrl+Shift+D` (distance); each cycles its tray submenu.
 
 ### Changed
+- VR submits each widget as its own native-resolution quad instead of one screen-size canvas — smaller uploads, and a hidden widget costs nothing.
+- Tray **Windows** and **VR** categories are mutually exclusive: **Windows** greys out while VR renders, **VR** greys out on the desktop overlay.
+- **Reset** restores the **Inputs** widget's default position but leaves it hidden (it's off by default); use the Widgets toggle to show it.
 - Hotkeys moved from `Ctrl+Alt` to `Ctrl+Shift` (less contested by gaming peripherals and vendor overlays); logging is now `Ctrl+Shift+L`.
 - Full global hotkey set: `Ctrl+Shift` + `R` reset, `C` click-through, `S` size, `L` logging, `P`/`W`/`D` VR placement/spread/distance, `Q` quit.
 - Each hotkey is inert while its tray entry is greyed: reset/size/click-through need widgets placed, logging a detected game, VR keys a live headset.
 - Tray **Data** category (Polling Hz, logging, Open logs folder) and `Ctrl+Shift+L` stay disabled until a game is detected and telemetry flows.
 
 ### Fixed
+- VR HUD widgets were clipped and shrank at non-default **Size** — fixed by a max-size texture with the widget centred and full (not sub-rect) bounds.
+- ACC is no longer detected from a stale `acpmf` shared-memory tag; a live ACC process must be running before its physics block is trusted.
 - Global hotkeys are released on every quit path, not just `closeEvent` (skipped by `QApplication.quit()`), avoiding err 1409 on the next launch.
 - Hotkeys register per-combo with failures attributed individually, so one `GetLastError()` no longer misreports a single conflict as total failure.
 
