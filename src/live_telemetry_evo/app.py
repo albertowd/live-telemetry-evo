@@ -44,6 +44,18 @@ DEFAULT_POLLING_HZ = 60
 
 _RESETTABLE_IDS = ("engine", "inputs", "FL", "FR", "RL", "RR")
 
+# (widget key, human label) for the per-widget show/hide toggles offered in
+# the tray's Windows and VR menus. Order sets the menu order. Keys match the
+# visibility-persistence ids and the ``all_views`` map built in ``run``.
+WIDGET_TOGGLES: tuple[tuple[str, str], ...] = (
+    ("engine", "Engine"),
+    ("inputs", "Inputs"),
+    ("FL", "Front Left"),
+    ("FR", "Front Right"),
+    ("RL", "Rear Left"),
+    ("RR", "Rear Right"),
+)
+
 # Scale factors applied on top of the auto-detected resolution multiplier.
 # Index 2 ("M") is 1.0 — i.e. matches the original auto-picked size.
 SIZE_FACTORS: tuple[float, ...] = (0.5, 0.75, 1.0, 1.25, 1.5)
@@ -171,12 +183,14 @@ def _reset_layout(engine: EngineView, inputs: InputsView,
                   wheels: dict[str, WheelView],
                   layout: ScreenLayout) -> None:
     """Restore every overlay widget to its default position and shown
-    state, and wipe persisted entries for them."""
+    state, and wipe persisted entries for them. Inputs is the exception —
+    it's hidden by default (Phase-3 widget), so reset restores its default
+    position but leaves it hidden; the tray "Widgets" toggle brings it up."""
     delete_entries(list(_RESETTABLE_IDS))
     engine.setGeometry(*_default_pos("engine", layout))
     engine.show()
     inputs.setGeometry(*_default_pos("inputs", layout))
-    inputs.show()
+    inputs.hide()
     for wid, view in wheels.items():
         view.setGeometry(*_default_pos(wid, layout))
         view.show()
@@ -311,6 +325,24 @@ def run(argv: list[str] | None = None) -> int:
     def _do_reset() -> None:
         _reset_layout(engine, inputs, wheels, layout)
 
+    # Per-widget show/hide, driven by the tray Windows/VR "Widgets" submenus.
+    # One visibility flag backs both menus and the desktop and headset views:
+    # a hidden widget isn't painted (so it's absent on the desktop overlay)
+    # and ``_vr_submit`` skips widgets whose ``isVisible()`` is False, so it
+    # drops out of the headset too. The choice persists like the × button's.
+    _all_views = {"engine": engine, "inputs": inputs, **wheels}
+
+    def _set_widget_visible(key: str, visible: bool) -> None:
+        view = _all_views.get(key)
+        if view is None:
+            return
+        view.setVisible(visible)
+        save_visibility(key, visible)
+
+    def _is_widget_visible(key: str) -> bool:
+        view = _all_views.get(key)
+        return bool(view is not None and view.isVisible())
+
     # --- Telemetry transport: bus + repaint timer + worker thread ----
     bus = FrameBus()
     logger = CsvLogger(bus)
@@ -430,6 +462,19 @@ def run(argv: list[str] | None = None) -> int:
         spread=load_vr_spread(DEFAULT_VR_SPREAD, VR_SPREAD_OPTIONS),
         distance=load_vr_distance(DEFAULT_VR_DISTANCE, VR_DISTANCE_OPTIONS),
     )
+    # Tell the VR output each widget's LARGEST pixel size, so it can allocate
+    # one fixed-size overlay texture per widget and upload smaller sizes into
+    # a sub-region of it. Resizing an overlay's texture mid-session left the
+    # HUD clipped at the panel edge (the compositor pins the backing surface
+    # to the first texture size); a fixed texture + per-frame UV bounds keeps
+    # the surface constant. The max is the layout at the biggest Size step.
+    _max_layout = compute_layout(geom.width(), geom.height(),
+                                 multiplier=base_mult * max(SIZE_FACTORS))
+    vr.set_max_sizes({
+        "engine": (_max_layout.engine.w, _max_layout.engine.h),
+        "inputs": (_max_layout.inputs.w, _max_layout.inputs.h),
+        **{wid: (p.w, p.h) for wid, p in _max_layout.wheels.items()},
+    })
 
     def _set_vr_placement(mode: str) -> None:
         save_vr_placement(mode)
@@ -486,6 +531,9 @@ def run(argv: list[str] | None = None) -> int:
         on_set_size=_set_size,
         current_size_index=lambda: size_idx,
         size_labels=SIZE_LABELS,
+        widget_toggles=WIDGET_TOGGLES,
+        on_toggle_widget=_set_widget_visible,
+        is_widget_visible=_is_widget_visible,
         on_set_polling_hz=_set_polling_hz,
         current_polling_hz=lambda: polling_hz,
         polling_hz_options=POLLING_HZ_OPTIONS,
@@ -559,7 +607,11 @@ def run(argv: list[str] | None = None) -> int:
         widgets_ready[0] = True
         if visibility.get("engine", True):
             engine.show()
-        # Inputs widget stays hidden after the countdown — see _apply_layout.
+        # Inputs defaults to hidden (Phase-3 widget), but honours an explicit
+        # persisted flag so the tray "Widgets" toggle survives a restart like
+        # the others — note the default is False here, not True.
+        if visibility.get("inputs", False):
+            inputs.show()
         for wid, view in wheels.items():
             if visibility.get(wid, True):
                 view.show()

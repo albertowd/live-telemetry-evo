@@ -24,7 +24,16 @@ Two submission paths, both verified empirically against SteamVR with
 * **GL texture streaming** (primary) — each overlay owns a small ring of
   persistent OpenGL textures on a shared offscreen Qt context; the grabbed
   image is uploaded into the next texture in the ring and handed to the
-  compositor via ``setOverlayTexture``, which swaps it atomically.
+  compositor via ``setOverlayTexture``, which swaps it atomically. Each ring
+  texture is a fixed size (the widget's largest configured size) and the
+  frame is written into its top-left sub-region with the overlay's texture
+  bounds pointed at the used fraction. This is deliberate: the compositor
+  pins an overlay's backing surface to the size of the FIRST texture it sees
+  and will not resize it, so streaming a differently-sized texture on a HUD
+  size change left the widget clipped at the panel edge. A fixed texture
+  keeps that surface constant; only the UV bounds change. Upload cost stays
+  widget-sized (only ``w*h`` pixels are pushed); only the allocation is
+  max-sized.
 * **Raw upload** (fallback when GL init fails) — ``setOverlayRaw``
   rebuilds the overlay's backing texture on every call and the quad can
   render empty between uploads, which shows as *blinking* at streaming
@@ -109,6 +118,13 @@ DASH_PITCH_RAD = math.radians(35.0)  # tilt top toward driver
 # stalls at streaming rates).
 _TEXTURE_RING = 3
 
+# Raw GL enums used by the manual ``glTexSubImage2D`` upload (the widget
+# frame is pushed into a sub-region of a fixed-size texture; QOpenGLTexture
+# has no offset-upload overload in PySide6, so the call is resolved by hand).
+_GL_TEXTURE_2D = 0x0DE1
+_GL_RGBA = 0x1908
+_GL_UNSIGNED_BYTE = 0x1401
+
 # OpenVR overlay keys must be process-unique; per-widget keys hang off this
 # base. The name is the human label shown in SteamVR's overlay list.
 _OVERLAY_KEY = "dev.albertowd.live-telemetry-evo"
@@ -186,7 +202,7 @@ class _WidgetOverlay:
     first time the widget is submitted; reused for its lifetime."""
 
     __slots__ = ("key", "handle", "textures", "next_tex", "rect",
-                 "tex_size", "shown")
+                 "tex_size", "content_size", "shown")
 
     def __init__(self, key: str) -> None:
         self.key = key
@@ -194,7 +210,13 @@ class _WidgetOverlay:
         self.textures: list = []     # GL ring (empty on the raw path)
         self.next_tex = 0            # round-robin index into the ring
         self.rect: tuple | None = None       # (x, y, w, h) last applied
-        self.tex_size: tuple | None = None   # (w, h) the ring is sized for
+        # The GL ring is allocated ONCE at the widget's maximum size and
+        # never resized (the compositor pins an overlay's backing surface to
+        # the first texture it sees; resizing it later is what clipped the
+        # HUD). ``content_size`` is the widget's current pixel size, uploaded
+        # centred into the fixed ring texture.
+        self.tex_size: tuple | None = None      # (w, h) the ring is sized for
+        self.content_size: tuple | None = None  # (w, h) uploaded this frame
         self.shown = False           # whether the quad is currently visible
 
 
@@ -216,6 +238,18 @@ class VROverlayOutput:
         self._system = None     # IVRSystem, for the system event queue
         self._running = False
         self._overlays: dict[str, _WidgetOverlay] = {}
+        # Per-widget MAXIMUM pixel size (w, h), keyed like the widgets. The
+        # GL texture for each overlay is allocated once at this size and the
+        # live widget is uploaded into its top-left corner, so the backing
+        # surface never resizes (see ``_upload_gl``). Supplied by the app
+        # from the largest configured HUD size; empty until then, in which
+        # case each overlay falls back to sizing its texture to the first
+        # frame it sees (correct only if the size never grows afterwards).
+        self._max_sizes: dict[str, tuple[int, int]] = {}
+        # ``glTexSubImage2D`` (not wrapped by QOpenGLTexture), resolved once
+        # the context is current (see ``_load_gl_funcs``). None on the raw
+        # path or if it can't be resolved.
+        self._gl_tex_sub_image = None
         # Re-apply every overlay's transform on the next submit (set on
         # start and whenever the placement mode changes).
         self._placement_dirty = True
@@ -334,11 +368,43 @@ class VROverlayOutput:
         self._ovr_texture = openvr.Texture_t()
         self._ovr_texture.eType = openvr.TextureType_OpenGL
         self._ovr_texture.eColorSpace = openvr.ColorSpace_Gamma
+        self._load_gl_funcs(ctx)
+
+    def _load_gl_funcs(self, ctx) -> None:
+        """Resolve the one GL entry point the sub-region upload needs but
+        QOpenGLTexture doesn't expose (``glTexSubImage2D``). On failure the
+        pointer stays ``None`` and ``_upload_gl`` falls back to a full-size
+        ``setData`` (which resizes the texture and reintroduces the clip on
+        size change — logged once so it's not silent)."""
+        try:
+            addr = int(ctx.getProcAddress(b"glTexSubImage2D"))
+            if addr == 0:
+                raise RuntimeError("glTexSubImage2D not found")
+            proto = ctypes.CFUNCTYPE(
+                None, ctypes.c_uint, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint,
+                ctypes.c_void_p)
+            self._gl_tex_sub_image = proto(addr)
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"[overlay] VR glTexSubImage2D unavailable ({exc}); "
+                  f"textures will resize per widget size")
+            self._gl_tex_sub_image = None
 
     def _ensure_overlay(self, key: str) -> _WidgetOverlay | None:
         """Return the overlay for ``key``, creating its quad on first use.
         Returns ``None`` if creation fails (the widget is skipped this
-        frame; the next frame retries)."""
+        frame; the next frame retries).
+
+        The overlay is created ONCE and lives for the session — it is never
+        recreated on a size change. The compositor pins an overlay's backing
+        surface to the size of the first texture it sees and won't resize it
+        (confirmed via ``GetOverlayTextureSize``, which kept reporting the
+        startup size through every later size, and reproduced as the HUD
+        being clipped at the panel edge). The size problem is therefore
+        solved on the texture side instead: the GL ring is a fixed maximum
+        size and the widget is uploaded into a sub-region of it, so the
+        surface the compositor pins is always the same (see
+        :meth:`_upload_gl`)."""
         ov = self._overlays.get(key)
         if ov is not None and ov.handle is not None:
             return ov
@@ -351,6 +417,11 @@ class VROverlayOutput:
             # Non-interactive HUD — no laser/mouse input on the quad.
             self._ov.setOverlayInputMethod(
                 ov.handle, openvr.VROverlayInputMethod_None)
+            # Static full-texture bounds with the V flip (GL path only; the
+            # helper no-ops on the raw path). The whole fixed texture — widget
+            # centred, padding transparent — maps onto the quad; the widget is
+            # never a sub-rectangle, because the compositor ignores sub-rect
+            # bounds (verified in the headset).
             self._apply_texture_bounds(ov)
         except Exception as exc:  # pylint: disable=broad-except
             print(f"[overlay] VR overlay create failed ({key}): "
@@ -361,6 +432,34 @@ class VROverlayOutput:
         ov.rect = None
         ov.shown = False
         return ov
+
+    def _destroy_overlay(self, ov: _WidgetOverlay) -> None:
+        """Tear one widget's quad and texture ring down, leaving the record
+        in the "not created yet" state so ``_ensure_overlay`` rebuilds it on
+        the next use. Used only by the wedge recovery path (``_recreate``);
+        a size change no longer destroys anything."""
+        try:
+            if self._gl_ctx is not None and ov.textures:
+                self._gl_ctx.makeCurrent(self._gl_surface)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        for tex in ov.textures:
+            try:
+                tex.destroy()
+            except Exception:  # pylint: disable=broad-except
+                pass
+        ov.textures = []
+        ov.next_tex = 0
+        ov.tex_size = None
+        ov.content_size = None
+        if ov.handle is not None:
+            try:
+                self._ov.destroyOverlay(ov.handle)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        ov.handle = None
+        ov.rect = None
+        ov.shown = False
 
     def _apply_texture_bounds(self, ov: _WidgetOverlay) -> None:
         """Flip the overlay's V texture coordinates when streaming GL.
@@ -447,6 +546,16 @@ class VROverlayOutput:
         self._distance = max(0.1, float(meters))
         self._placement_dirty = True
 
+    def set_max_sizes(self, sizes: dict[str, tuple[int, int]]) -> None:
+        """Declare each widget's LARGEST pixel size, keyed like the widgets
+        passed to :meth:`submit_widgets` (``"engine"``, ``"inputs"``,
+        ``"FL"`` …). Each overlay's GL texture is allocated once at this
+        size and every frame is uploaded into its top-left corner, so the
+        compositor's backing surface never resizes — the fix for the HUD
+        being clipped at non-default sizes. Call before :meth:`start`; the
+        app derives it from the biggest configured HUD size."""
+        self._max_sizes = {k: (int(w), int(h)) for k, (w, h) in sizes.items()}
+
     def _apply_transform(self, ov: _WidgetOverlay,
                          x: int, y: int, w: int, h: int,
                          screen_w: int, screen_h: int) -> None:
@@ -458,9 +567,21 @@ class VROverlayOutput:
         horizontal distance from screen centre becomes an arc length, hence
         an angle around the cylinder, and the quad is yawed to face inward.
         Vertical offset stays a straight translation (screen-Y is down,
-        VR-Y is up)."""
+        VR-Y is up).
+
+        The quad is sized to the widget's MAXIMUM pixel size, not the current
+        one, because the texture is fixed at that size with the live widget
+        centred in it (see :meth:`_upload_gl`). The widget's content therefore
+        sits at the centre of the max-sized quad, and the quad is centred on
+        the widget's actual on-screen centre — so the widget lands exactly
+        where it belongs and at its true size, with the surrounding padding
+        transparent. Sizing the quad to the widget instead would shrink the
+        centred content, since the compositor ignores sub-rect texture
+        bounds and always maps the whole texture onto the quad."""
         mpp = WIDTH_M / screen_w           # metres per screen pixel
-        width_m = max(0.001, w * mpp)
+        maxw, maxh = self._max_sizes.get(ov.key, (w, h))
+        width_m = max(0.001, maxw * mpp)
+        # Centre the (max-sized) quad on the widget's on-screen centre.
         cx = x + w / 2.0
         cy = y + h / 2.0
         radius = self._distance
@@ -490,14 +611,6 @@ class VROverlayOutput:
         except Exception as exc:  # pylint: disable=broad-except
             print(f"[overlay] VR placement update failed ({ov.key}): {exc}")
             return
-        # Diagnostic (fires only on a size/placement change, not per frame):
-        # surfaces the pixel rect and the derived quad geometry so a "content
-        # clipped at the panel edge" report can be traced to whichever number
-        # is off — texture size, quad metres, or angle.
-        height_m = h * mpp
-        print(f"[overlay] VR place {ov.key}: rect={w}x{h}@({x},{y}) "
-              f"screen={screen_w}x{screen_h} -> quad {width_m:.3f}x{height_m:.3f} m "
-              f"theta={math.degrees(theta):.1f} dy={dy:.3f}")
         ov.rect = (x, y, w, h)
 
     def _hmd_pose(self):
@@ -593,38 +706,74 @@ class VROverlayOutput:
                          upload_ms)
 
     def _upload_gl(self, ov: _WidgetOverlay, image: QImage) -> bool:
-        """Push one widget frame as a GL texture via ``setOverlayTexture``.
-        The ring is allocated once per size and updated in place
-        round-robin: creating a texture per frame doubles the driver work
-        and stalls at headset rates, while the ring keeps the compositor
-        reading a texture that isn't the one being overwritten."""
+        """Push one widget frame to its overlay quad on the GL path.
+
+        The texture ring is allocated ONCE at the widget's maximum size
+        (``_max_sizes``) and never resized, and the live frame is uploaded
+        **centred** in it (``glTexSubImage2D``) with the surrounding padding
+        transparent. The quad is the max size (see :meth:`_apply_transform`)
+        with full texture bounds, so the whole texture maps onto it — the
+        centred widget lands at its true size and position and the padding
+        shows nothing. This avoids sub-rectangle texture bounds, which the
+        compositor ignores (it always maps the whole texture), which is what
+        clipped / shrank the HUD at non-default sizes.
+
+        The ring (updated round-robin) keeps the compositor from reading the
+        texture being overwritten; textures are created per size, not per
+        frame, so the driver cost stays flat at headset rates."""
         w, h = image.width(), image.height()
+        maxw, maxh = self._max_sizes.get(ov.key, (w, h))
+        # Never exceed the allocation (a size the app didn't declare); the
+        # centred upload would otherwise write out of bounds.
+        w, h = min(w, maxw), min(h, maxh)
         try:
             if not self._gl_ctx.makeCurrent(self._gl_surface):
                 raise RuntimeError("makeCurrent failed")
-            # (Re)allocate the ring when the widget size changes (e.g. the
-            # in-overlay size-cycle button).
-            if ov.tex_size != (w, h):
-                for tex in ov.textures:
-                    tex.destroy()
-                ov.textures = []
-                ov.next_tex = 0
+            fixed = self._gl_tex_sub_image is not None
+            # Fixed max texture (centred upload) when the sub-image entry
+            # point resolved; otherwise fall back to a per-size full texture
+            # (loses the fix on resize, but keeps the HUD working).
+            ring_size = (maxw, maxh) if fixed else (w, h)
+            if ov.tex_size != ring_size:
+                stale, ov.textures, ov.next_tex = ov.textures, [], 0
                 for _ in range(_TEXTURE_RING):
                     tex = QOpenGLTexture(QOpenGLTexture.Target.Target2D)
                     tex.setFormat(QOpenGLTexture.TextureFormat.RGBA8_UNorm)
-                    tex.setSize(w, h)
+                    tex.setSize(*ring_size)
                     tex.setMipLevels(1)
                     tex.setMinMagFilters(QOpenGLTexture.Filter.Linear,
                                          QOpenGLTexture.Filter.Linear)
                     tex.allocateStorage(QOpenGLTexture.PixelFormat.RGBA,
                                         QOpenGLTexture.PixelType.UInt8)
                     ov.textures.append(tex)
-                ov.tex_size = (w, h)
+                for tex in stale:
+                    tex.destroy()
+                ov.tex_size = ring_size
+                ov.content_size = None
+            # On a widget size change, clear every ring texture to transparent
+            # so a previous, larger frame doesn't ghost around the smaller one
+            # (the centred frame only overwrites its own centred region).
+            if fixed and ov.content_size != (w, h):
+                self._clear_ring(ov, maxw, maxh)
+                ov.content_size = (w, h)
             tex = ov.textures[ov.next_tex]
             ov.next_tex = (ov.next_tex + 1) % len(ov.textures)
-            tex.setData(QOpenGLTexture.PixelFormat.RGBA,
-                        QOpenGLTexture.PixelType.UInt8,
-                        image.constBits())
+            if fixed:
+                # Centre the frame in the fixed texture. RGBA8888 rows are
+                # w*4 bytes (4-aligned), so the default GL unpack alignment
+                # needs no change.
+                xoff, yoff = (maxw - w) // 2, (maxh - h) // 2
+                data = bytes(image.constBits())
+                buf = (ctypes.c_char * len(data)).from_buffer_copy(data)
+                tex.bind()
+                self._gl_tex_sub_image(
+                    _GL_TEXTURE_2D, 0, xoff, yoff, w, h,
+                    _GL_RGBA, _GL_UNSIGNED_BYTE, ctypes.cast(buf, ctypes.c_void_p))
+                tex.release()
+            else:
+                tex.setData(QOpenGLTexture.PixelFormat.RGBA,
+                            QOpenGLTexture.PixelType.UInt8,
+                            image.constBits())
             self._ovr_texture.handle = int(tex.textureId())
             self._ov.setOverlayTexture(ov.handle, self._ovr_texture)
         except Exception as exc:  # pylint: disable=broad-except
@@ -632,6 +781,20 @@ class VROverlayOutput:
             return False
         self._on_submit_success(w, h)
         return True
+
+    def _clear_ring(self, ov: _WidgetOverlay, maxw: int, maxh: int) -> None:
+        """Zero (transparent) every ring texture. Called on a size change so
+        the transparent padding around the newly-centred, smaller frame is
+        actually clear rather than showing the previous larger frame."""
+        if self._gl_tex_sub_image is None:
+            return
+        zeros = (ctypes.c_char * (maxw * maxh * 4))()
+        ptr = ctypes.cast(zeros, ctypes.c_void_p)
+        for tex in ov.textures:
+            tex.bind()
+            self._gl_tex_sub_image(_GL_TEXTURE_2D, 0, 0, 0, maxw, maxh,
+                                   _GL_RGBA, _GL_UNSIGNED_BYTE, ptr)
+            tex.release()
 
     def _upload_raw(self, ov: _WidgetOverlay, image: QImage) -> bool:
         """Fallback when GL init failed: push the frame as raw RGBA bytes.
@@ -654,6 +817,10 @@ class VROverlayOutput:
         except Exception as exc:  # pylint: disable=broad-except
             self._on_submit_failure(exc, w, h)
             return False
+        # ``setOverlayRaw`` takes explicit dimensions and rebuilds the backing
+        # surface each call, so the raw path resizes cleanly and needs none of
+        # the fixed-texture machinery the GL path uses.
+        ov.tex_size = (w, h)
         self._on_submit_success(w, h)
         return True
 
@@ -722,22 +889,8 @@ class VROverlayOutput:
         raw-upload path; the next submit rebuilds them lazily. Throttled by
         the caller."""
         print("[overlay] VR overlays wedged; recreating")
-        try:
-            if self._gl_ctx is not None:
-                self._gl_ctx.makeCurrent(self._gl_surface)
-        except Exception:  # pylint: disable=broad-except
-            pass
         for ov in self._overlays.values():
-            for tex in ov.textures:
-                try:
-                    tex.destroy()
-                except Exception:  # pylint: disable=broad-except
-                    pass
-            if ov.handle is not None:
-                try:
-                    self._ov.destroyOverlay(ov.handle)
-                except Exception:  # pylint: disable=broad-except
-                    pass
+            self._destroy_overlay(ov)
         # Drop all per-widget state; submit_widgets recreates on demand.
         self._overlays = {}
         self._placement_dirty = True

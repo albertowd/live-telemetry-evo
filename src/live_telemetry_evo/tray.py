@@ -33,6 +33,9 @@ def make_tray(
     on_set_size: Callable[[int], None],
     current_size_index: Callable[[], int],
     size_labels: Sequence[str],
+    widget_toggles: Sequence[tuple[str, str]],
+    on_toggle_widget: Callable[[str, bool], None],
+    is_widget_visible: Callable[[str], bool],
     on_set_polling_hz: Callable[[int], None],
     current_polling_hz: Callable[[], int],
     polling_hz_options: Sequence[int],
@@ -92,6 +95,25 @@ def make_tray(
     # VR, Windows — followed by Check for Updates and Quit. Each category
     # groups the controls that act on one part of the app so the flat list
     # doesn't sprawl as more knobs are added.
+
+    # Per-widget show/hide toggles. One checkable action per widget, created
+    # once and added to BOTH the VR and Windows "Widgets" submenus — a single
+    # QAction shown in two menus shares its checked state, so toggling from
+    # either place (and the aboutToShow re-sync) stays consistent. Not
+    # mutually exclusive, so no action group. No shortcut hints by request.
+    widget_actions: list[tuple[str, QAction]] = []
+    for _key, _label in widget_toggles:
+        a = QAction(_label, menu)
+        a.setCheckable(True)
+        # ``triggered`` passes the new checked state for a checkable action.
+        a.triggered.connect(
+            lambda checked, k=_key: on_toggle_widget(k, checked))
+        widget_actions.append((_key, a))
+
+    def _add_widgets_submenu(parent_menu: QMenu) -> None:
+        sub = parent_menu.addMenu("Widgets")
+        for _k, act in widget_actions:
+            sub.addAction(act)
 
     # ---- Data: telemetry poll rate + CSV logging --------------------------
     # The whole category is greyed out until a game is detected and the
@@ -211,6 +233,11 @@ def make_tray(
         a.triggered.connect(lambda _checked, i=idx: on_set_size(i))
         vr_size_actions.append(a)
 
+    # Per-widget show/hide, so individual panels can be dropped from the
+    # headset HUD. Shares the same actions (and visibility flags) as the
+    # Windows "Widgets" submenu below.
+    _add_widgets_submenu(vr_menu)
+
     # ---- Windows: on-screen overlay widget layout ------------------------
     windows_menu = menu.addMenu("Windows")
 
@@ -248,6 +275,10 @@ def make_tray(
         # action sets its own index instead of all firing the last one.
         a.triggered.connect(lambda _checked, i=idx: on_set_size(i))
         size_actions.append(a)
+
+    # Per-widget show/hide on the desktop overlay (same actions / flags as
+    # the VR "Widgets" submenu).
+    _add_widgets_submenu(windows_menu)
 
     menu.addSeparator()
 
@@ -294,6 +325,10 @@ def make_tray(
         # VR Size submenu mirrors the same current index (shared handler).
         for i, a in enumerate(vr_size_actions):
             a.setChecked(i == cur)
+        # Widget show/hide checkmarks reflect live visibility (shared actions
+        # appear in both the VR and Windows "Widgets" submenus).
+        for key, a in widget_actions:
+            a.setChecked(is_widget_visible(key))
         cur_hz = current_polling_hz()
         for hz, a in hz_actions:
             a.setChecked(hz == cur_hz)
