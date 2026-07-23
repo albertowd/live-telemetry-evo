@@ -345,13 +345,17 @@ class OverlayWindow(QWidget):
     def click_through(self) -> bool:
         return self._click_through
 
-    def toggle_click_through(self) -> None:
+    def toggle_click_through(self, log: bool = True) -> None:
+        """Flip click-through. ``log`` records it as a user action; the
+        startup call that establishes the default-on state passes
+        ``log=False`` so it isn't logged as something the user did."""
         self._click_through = not self._click_through
         self.setAttribute(Qt.WA_TransparentForMouseEvents, self._click_through)
         self.setWindowFlags(self.windowFlags())
         self.show()
         _force_topmost(int(self.winId()))
-        log_action(f"click-through {'on' if self._click_through else 'off'}")
+        if log:
+            log_action(f"click-through {'on' if self._click_through else 'off'}")
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton and not self._click_through:

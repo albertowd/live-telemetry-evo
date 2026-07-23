@@ -705,7 +705,8 @@ def run(argv: list[str] | None = None) -> int:
     window.show()
     # Default to click-through ON: a full-screen overlay must not steal mouse
     # input from the game underneath. Toggle from the tray (Windows menu).
-    window.toggle_click_through()
+    # log=False — this is startup initialisation, not a user action.
+    window.toggle_click_through(log=False)
 
     if args.source == "auto":
         detection = DetectionView(window)
