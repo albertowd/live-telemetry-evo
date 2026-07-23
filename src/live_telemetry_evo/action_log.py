@@ -41,14 +41,15 @@ def _handle():
 
 def log_action(message: str) -> None:
     """Record one user action to the action log (and echo to the console).
-    Best-effort: never raises."""
-    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  {message}"
-    print(f"[action] {message}")
+    Every line is prefixed with a bracketed local timestamp. Best-effort:
+    never raises."""
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{stamp}] [action] {message}")
     with _lock:
         fp = _handle()
         if fp is not None:
             try:
-                fp.write(line + "\n")
+                fp.write(f"[{stamp}] {message}\n")
             except Exception:  # pylint: disable=broad-except
                 pass
 
