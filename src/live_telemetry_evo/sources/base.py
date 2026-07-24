@@ -30,6 +30,7 @@ class TelemetrySource(QObject):
 
     frame = Signal(TelemetryFrame)
     hz_change_requested = Signal(int)
+    stop_requested = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -38,6 +39,14 @@ class TelemetrySource(QObject):
         # Subclasses override ``set_hz`` to mutate their own QTimer.
         # pylint: disable-next=no-member
         self.hz_change_requested.connect(self.set_hz, Qt.QueuedConnection)
+        # Blocking queued — emitted from the UI thread at shutdown and
+        # returns only after ``stop()`` ran on the worker, so the polling
+        # QTimer is stopped on the thread it lives on (stopping it from
+        # the main thread trips Qt's "Timers cannot be stopped from
+        # another thread"). Must NEVER be emitted from the worker thread
+        # itself — a blocking queued emit to your own thread deadlocks.
+        # pylint: disable-next=no-member
+        self.stop_requested.connect(self.stop, Qt.BlockingQueuedConnection)
 
     def set_bus(self, bus: FrameBus) -> None:
         """Wire the source to a :class:`FrameBus`. Set before the source

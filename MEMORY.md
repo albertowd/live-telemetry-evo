@@ -1,7 +1,7 @@
 # Shared-Memory Reference
 
 Cross-game cheat sheet for the four games this overlay supports. The
-ctypes structs in `src/overlay/sources/<game>.py` are the source of
+ctypes structs in `src/live_telemetry_evo/sources/<game>.py` are the source of
 truth for the actual binary layout; this document is the
 human-readable index — what each game publishes, what it doesn't, and
 the non-obvious gotchas the source classes have to handle.
@@ -24,7 +24,7 @@ investigation history) see
 | **Temperature unit** | °C | °C | °C | **Kelvin** |
 | **Wheel order** | FL, FR, RL, RR | FL, FR, RL, RR | FL, FR, RL, RR | FL, FR, RL, RR |
 | **Gear convention** | 0=R, 1=N, 2+=fwd | 0=R, 1=N, 2+=fwd | 0=R, 1=N, 2+=fwd | 0=R, 1=N, 2+=fwd |
-| **Reader source** | [`ac_evo.py`](src/overlay/sources/ac_evo.py) | [`ac1.py`](src/overlay/sources/ac1.py) | [`acc.py`](src/overlay/sources/acc.py) | [`acrally.py`](src/overlay/sources/acrally.py) |
+| **Reader source** | [`ac_evo.py`](src/live_telemetry_evo/sources/ac_evo.py) | [`ac1.py`](src/live_telemetry_evo/sources/ac1.py) | [`acc.py`](src/live_telemetry_evo/sources/acc.py) | [`acrally.py`](src/live_telemetry_evo/sources/acrally.py) |
 
 **Tag collision.** Three of the four games publish under the *same*
 shared-memory tag names (`Local\acpmf_*`). Only one of those games can
@@ -36,7 +36,7 @@ struct layouts differ. Attaching with the wrong layout reads garbage.
 
 ## 2. AC Evo
 
-* **Source:** [`src/overlay/sources/ac_evo.py`](src/overlay/sources/ac_evo.py)
+* **Source:** [`src/live_telemetry_evo/sources/ac_evo.py`](src/live_telemetry_evo/sources/ac_evo.py)
 * **Deep reference:** [`docs/SHARED_MEMORY.md`](docs/SHARED_MEMORY.md)
 * **Tags:** `Local\acevo_pmf_physics` / `_graphics` / `_static`
 
@@ -79,7 +79,7 @@ struct layouts differ. Attaching with the wrong layout reads garbage.
 
 ## 3. AC1 (original Assetto Corsa)
 
-* **Source:** [`src/overlay/sources/ac1.py`](src/overlay/sources/ac1.py)
+* **Source:** [`src/live_telemetry_evo/sources/ac1.py`](src/live_telemetry_evo/sources/ac1.py)
 * **Tags:** `Local\acpmf_physics` / `_graphics` / `_static`
 
 ### Layout
@@ -110,7 +110,7 @@ struct layouts differ. Attaching with the wrong layout reads garbage.
 
 ## 4. ACC (Assetto Corsa Competizione)
 
-* **Source:** [`src/overlay/sources/acc.py`](src/overlay/sources/acc.py)
+* **Source:** [`src/live_telemetry_evo/sources/acc.py`](src/live_telemetry_evo/sources/acc.py)
 * **Tags:** `Local\acpmf_physics` / `_graphics` / `_static` (shares
   with AC1 — `--source acc` selects the parsing layout)
 * **Spec PDF:** `ACCSharedMemoryDocumentationV1.8.12.pdf` (bundled at
@@ -156,7 +156,7 @@ a running game and see flat zero.
 
 ## 5. AC Rally
 
-* **Source:** [`src/overlay/sources/acrally.py`](src/overlay/sources/acrally.py)
+* **Source:** [`src/live_telemetry_evo/sources/acrally.py`](src/live_telemetry_evo/sources/acrally.py)
 * **Tags:** `Local\acpmf_physics` / `_graphics` / `_static` (shares
   with AC1 and ACC — `--source acrally` selects)
 * **Verification tools:**
@@ -311,10 +311,10 @@ When a new game build changes a field:
    * AC Rally: `python tools/inspect_acrally.py parked` then `driving`
      and `diff`.
    * Anything else: write a tweak of `tools/probe_shm.py` or use the
-     existing `python -m overlay.sources.dump physics --parsed`
+     existing `python -m live_telemetry_evo.sources.dump physics --parsed`
      (AC Evo only today; easy to extend).
 2. Update the matching ctypes struct in
-   `src/overlay/sources/<game>.py`. Keep `_pack_ = 4` and preserve
+   `src/live_telemetry_evo/sources/<game>.py`. Keep `_pack_ = 4` and preserve
    the documented offsets — if you insert a field mid-struct, every
    offset after it shifts and you'll silently corrupt later reads.
 3. If the change affects the "what each game publishes" matrix in

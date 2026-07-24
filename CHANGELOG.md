@@ -4,7 +4,45 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.1] - 2026-07-23
+
+### Added
+- Per-widget show/hide: a **Widgets** submenu in the tray **VR** and **Windows** menus toggles each panel (engine, inputs, four wheels); persisted.
+- VR widgets wrap around the viewer on a **cylinder** — the corner panels turn to face inward — instead of sitting on a flat plane.
+- Tray **VR** submenus **Spread** (sideways fan-out) and **Distance** (panel distance), plus **Size** in VR — each persisted, applied live.
+- Global hotkeys `Ctrl+Shift+C` (toggle click-through) and `Ctrl+Shift+S` (cycle widget size `XS → S → M → L → XL`, wrapping).
+- Global VR hotkeys `Ctrl+Shift+P` (placement toggle), `Ctrl+Shift+W` (spread) and `Ctrl+Shift+D` (distance); each cycles its tray submenu.
+
+### Changed
+- VR submits each widget as its own native-resolution quad instead of one screen-size canvas — smaller uploads, and a hidden widget costs nothing.
+- Tray **Windows** and **VR** categories are mutually exclusive: **Windows** greys out while VR renders, **VR** greys out on the desktop overlay.
+- **Reset** restores the **Inputs** widget's default position but leaves it hidden (it's off by default); use the Widgets toggle to show it.
+- Hotkeys moved from `Ctrl+Alt` to `Ctrl+Shift` (less contested by gaming peripherals and vendor overlays); logging is now `Ctrl+Shift+L`.
+- Full global hotkey set: `Ctrl+Shift` + `R` reset, `C` click-through, `S` size, `L` logging, `P`/`W`/`D` VR placement/spread/distance, `Q` quit.
+- Each hotkey is inert while its tray entry is greyed: reset/size/click-through need widgets placed, logging a detected game, VR keys a live headset.
+- Tray **Data** category (Polling Hz, logging, Open logs folder) and `Ctrl+Shift+L` stay disabled until a game is detected and telemetry flows.
+
+### Fixed
+- VR HUD widgets were clipped and shrank at non-default **Size** — fixed by a max-size texture with the widget centred and full (not sub-rect) bounds.
+- ACC is no longer detected from a stale `acpmf` shared-memory tag; a live ACC process must be running before its physics block is trusted.
+- Global hotkeys are released on every quit path, not just `closeEvent` (skipped by `QApplication.quit()`), avoiding err 1409 on the next launch.
+- Hotkeys register per-combo with failures attributed individually, so one `GetLastError()` no longer misreports a single conflict as total failure.
+
+## [0.7.0] - 2026-06-11
+
+### Added
+- VR output: the HUD is submitted to the **SteamVR / OpenVR** compositor as a flat overlay quad — one backend for every PCVR headset.
+- `--vr` forces VR on, `--novr` forces it off; default auto-detects a running SteamVR runtime + connected HMD and enables VR on its own.
+- Tray submenu **VR placement** — **Head-locked** (default) or **Fixed in place**; persisted and applied to the live overlay without a restart.
+- **Fixed in place** freezes the quad where it floats at activation; re-selecting it re-anchors at the current gaze.
+- New `overlay.vr` package — `detect` (SteamVR/HMD probes) + `VROverlayOutput` (lifecycle, placement, submit, event pump); import-guarded.
+- Frames stream into a persistent OpenGL texture ring (V bounds flipped to render right-side-up); raw-RGBA fallback when GL init fails.
+- One VR tick dispatches telemetry, grabs, composites, and submits at the HMD refresh rate; steps down when the tick cost can't sustain it.
+- Desktop overlay is blanked while VR is live (no duplicate copy on the monitor); widgets keep rendering so the headset still receives them.
+- Widget `×` close buttons are hidden while VR is live — the grab would bake them into the headset quad with no pointer to click them.
+
+### Fixed
+- Update check queries `github.com` instead of `api.github.com` (unreachable on some networks); asset URL rebuilt from the release name.
 
 ## [0.6.6] - 2026-05-19
 
@@ -14,9 +52,6 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray entry **Check for Updates** — 4 states: idle → `Checking...` → `Downloading...` → **Restart to Update** (launches new .exe, quits).
 - Tray balloon notification when a fresh download completes; silent on already-on-disk / up-to-date / offline paths.
 - New `overlay.updater` module — `UpdateChecker` worker + `UpdateController` (state machine + Qt signals the tray menu subscribes to).
-
-### Changed
-- PyInstaller spec keeps Python's stdlib SSL DLLs (`libcrypto-*` / `libssl-*`) for `urllib` HTTPS; `Qt6Network.dll` + TLS plugins stay excluded.
 
 ## [0.6.5] - 2026-05-18
 
@@ -105,8 +140,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
-[Unreleased]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.6...HEAD
-[0.6.6]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.5...v0.6.6
-[0.6.5]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.6.0...v0.6.5
-[0.6.0]: https://github.com/albertowd/live-telemetry-ac-evo/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/albertowd/live-telemetry-ac-evo/releases/tag/v0.5.0
+[0.7.1]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.6...v0.7.1
+[0.7.0]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.6...v0.7.0
+[0.6.6]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.5...v0.6.6
+[0.6.5]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.0...v0.6.5
+[0.6.0]: https://github.com/albertowd/live-telemetry-evo/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/albertowd/live-telemetry-evo/releases/tag/v0.5.0

@@ -1,4 +1,4 @@
-from overlay.app import run
+from live_telemetry_evo.app import run
 
 
 if __name__ == "__main__":

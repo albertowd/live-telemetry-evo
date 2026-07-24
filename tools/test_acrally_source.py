@@ -14,8 +14,8 @@ import time
 
 sys.path.insert(0, "src")
 
-from overlay.sources.acrally import AcRallySharedMemoryReader  # noqa: E402
-from overlay.sources.acrally import AcRallyTelemetrySource, _k_to_c  # noqa: E402
+from live_telemetry_evo.sources.acrally import AcRallySharedMemoryReader  # noqa: E402
+from live_telemetry_evo.sources.acrally import AcRallyTelemetrySource, _k_to_c  # noqa: E402
 
 
 def _print_frame_summary(reader: AcRallySharedMemoryReader, source: AcRallyTelemetrySource) -> None:

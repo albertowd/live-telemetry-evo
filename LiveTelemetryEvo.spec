@@ -16,13 +16,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_dynamic_libs
+
 
 # When PyInstaller runs us, ``__file__`` isn't defined on every Python
 # version, but the spec is always invoked from the project root with
 # ``pyinstaller LiveTelemetryEvo.spec``, so ``Path.cwd()`` is the source root.
 ROOT = Path.cwd()
 PROJECT = "LiveTelemetryEvo"
-ENTRYPOINT = ROOT / "src" / "overlay" / "__main__.py"
+ENTRYPOINT = ROOT / "src" / "live_telemetry_evo" / "__main__.py"
 RES_DIR = ROOT / "resources"
 ICON_PNG = RES_DIR / "icon.png"
 ICON_ICO = RES_DIR / "icon.ico"
@@ -84,7 +86,7 @@ UNWANTED_BINARIES = (
     "Qt6OpenGL.dll", "Qt6OpenGLWidgets.dll",
     # QtNetwork only — Python's stdlib ssl module needs the
     # ``libcrypto-*.dll`` / ``libssl-*.dll`` pair too (used by
-    # ``overlay.updater`` for HTTPS to the GitHub releases API), so
+    # ``live_telemetry_evo.updater`` for HTTPS to the GitHub releases API), so
     # those substrings are no longer in this filter.
     "Qt6Network.dll",
     # PDF / SVG — both unused at runtime (fetch_icons.py uses QtSvg but
@@ -122,12 +124,19 @@ if ICON_PNG.exists():
     DATAS.append((str(ICON_PNG), "resources"))
 
 
+# pyopenvr's native lib (openvr_api.dll) ships inside the package. The
+# overlay imports ``openvr`` lazily inside a try/except, so PyInstaller's
+# static analysis won't pull it in on its own — list it as a hidden import
+# and collect its DLL explicitly so VR works in the bundled .exe.
+OPENVR_BINARIES = collect_dynamic_libs("openvr")
+
+
 a = Analysis(
     [str(ENTRYPOINT)],
     pathex=[str(ROOT / "src")],
-    binaries=[],
+    binaries=OPENVR_BINARIES,
     datas=DATAS,
-    hiddenimports=[],
+    hiddenimports=["openvr"],
     hookspath=[],
     runtime_hooks=[],
     excludes=EXCLUDED_MODULES,

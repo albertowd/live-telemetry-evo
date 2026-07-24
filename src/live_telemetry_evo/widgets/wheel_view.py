@@ -22,13 +22,6 @@ from .draggable import DraggableWidget
 
 LOGICAL_W = 512.0
 LOGICAL_H = 316.0
-# Top padding above the tire silhouette. The rotation pivot is at the
-# tire's centre, so the top corners swing both sideways and slightly
-# downward (1 - cos θ) under camber tilt — without a margin a 5°
-# visual rotation already clips ~7 px above y = 0. 16 px handles up to
-# ~14° visual rotation, which covers any realistic camber setup at the
-# 2× amplification below.
-TOP_MARGIN = 16.0
 # Tire silhouette + shared inner band (IMO temps, dirt, contact bars).
 # Logical x is given for left-side wheels; ``_x_left`` mirrors it for
 # right-side wheels. ``TIRE_X = 158`` centres the tire between the two
@@ -41,6 +34,27 @@ TIRE_W = 160.0
 TIRE_H = 256.0
 BAND_X = TIRE_X + 12.0
 BAND_W = 136.0
+
+# The tire silhouette rotates about its centre under camber tilt. The
+# game's camber is dynamic and can be overloaded far past setup range by
+# crashes / kerb strikes, so there is no useful "max angle" to design for
+# — instead size for the absolute worst case across ALL rotations.
+#
+# A rectangle rotated about its centre never reaches past its HALF-DIAGONAL
+# in any direction, and ``w·sinθ + h·cosθ`` attains exactly that diagonal
+# at θ = atan(w/h). So the half-diagonal is the most the silhouette can
+# ever extend above OR below its pivot, at any angle whatsoever. Sizing
+# from it makes the widget clip-proof for any camber spike.
+TIRE_HALF_DIAGONAL = math.hypot(TIRE_W, TIRE_H) / 2.0  # ≈151 px for 160×256
+
+# The pivot is the tire centre, ``TIRE_H/2`` below the tire's top, so only
+# the extent BEYOND that own half-height needs padding above. ceil → whole
+# pixels. ≈23 px here. The rotated silhouette's vertical span is therefore
+# [TOP_MARGIN + TIRE_H/2 − HALF_DIAGONAL, TOP_MARGIN + TIRE_H/2 +
+# HALF_DIAGONAL] = [~0, ~302]; the top lands at y≈0 (no clip) and the
+# bottom (~302) sits above the lowest element — the contact-patch bars at
+# TOP_MARGIN + 288 ≈ 311 — so everything stays inside LOGICAL_H (316).
+TOP_MARGIN = float(math.ceil(TIRE_HALF_DIAGONAL - TIRE_H / 2.0))
 WARNING_TIME_S = 0.5
 LOCK_BLINK_PERIOD_S = 0.1
 # Tire-load circle: pixels of diameter per Newton. Calibrated so a

@@ -32,8 +32,8 @@ from typing import Any
 
 sys.path.insert(0, "src")
 
-from overlay.sources._win32_mapping import NamedMapping  # noqa: E402
-from overlay.sources.acc import (_SPageFilePhysics, _SPageFileGraphic,  # noqa: E402
+from live_telemetry_evo.sources._win32_mapping import NamedMapping  # noqa: E402
+from live_telemetry_evo.sources.acc import (_SPageFilePhysics, _SPageFileGraphic,  # noqa: E402
                                   _SPageFileStatic, PHYSICS_TAG, GRAPHICS_TAG,
                                   STATIC_TAG)
 
