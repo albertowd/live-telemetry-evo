@@ -155,6 +155,26 @@ One widget per corner. The inner face of the tire always points toward the scree
 
 [IMG alt="Overlay running on top of AC1"]https://raw.githubusercontent.com/albertowd/live-telemetry-evo/main/resources/previews/ac1.webp[/IMG]
 
+[SIZE=5][B]VR (SteamVR / OpenVR)[/B][/SIZE]
+
+A desktop overlay is invisible inside a headset — the VR compositor draws the game straight to the HMD and ignores desktop windows. So in VR the overlay submits the HUD to the [B]SteamVR (OpenVR)[/B] compositor instead: each widget becomes its own overlay quad, placed on a gentle cylinder that wraps around you so the panel keeps the same layout you set on the desktop. Each quad uploads only its own pixels at native resolution, so the text stays as crisp as it is on the monitor.
+
+One backend covers every PCVR headset that runs through SteamVR — a [B]Pimax[/B] (PiTool → SteamVR) and a [B]Meta Quest 3[/B] (Link / Air Link / Steam Link / Virtual Desktop → SteamVR) look identical from here. The game still runs on the PC; this is PCVR, not the Quest's standalone mode.
+
+VR turns on by itself: with no flag the overlay polls for a running SteamVR runtime plus a connected HMD and enables the VR overlay the moment both are present. [COLOR=rgb(44, 130, 201)]--vr[/COLOR] forces it on now (falling back to the desktop overlay if SteamVR isn't available); [COLOR=rgb(44, 130, 201)]--novr[/COLOR] forces it off.
+
+Everything about the panel is tunable live from the tray [B]VR[/B] menu (and the matching global hotkeys), persisted across sessions:
+
+[LIST]
+[*][B]Placement[/B] — [B]Head-locked[/B] (default) keeps the panel in front of your eyes, following your gaze; [B]Fixed in place[/B] freezes it in the play space where it floats when you pick the mode (re-select to re-anchor at your current gaze).
+[*][B]Spread[/B] — how wide the widgets fan out sideways around the cylinder (lower pulls the corner panels toward the centre of view).
+[*][B]Distance[/B] — how far the whole panel floats from you.
+[*][B]Size[/B] — the same XS → XL scale as on the desktop, applied in the headset too.
+[*][B]Widgets[/B] — show or hide each panel (engine, inputs, and the four wheels) individually, so you can pare the headset HUD down to just what you want.
+[/LIST]
+
+The OpenVR binding ships inside the released [COLOR=rgb(44, 130, 201)].exe[/COLOR] and the import is guarded, so machines without SteamVR simply run the desktop overlay as before.
+
 [SIZE=5][B]Controls[/B][/SIZE]
 
 Hotkeys are registered globally with Win32 [COLOR=rgb(44, 130, 201)]RegisterHotKey[/COLOR], so they fire even while the game has focus:
