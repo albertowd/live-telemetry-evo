@@ -9,7 +9,8 @@ from PySide6.QtWidgets import QWidget
 from ..colors import Colors
 from ..fonts import label_font
 from ..resources import app_icon_path
-from ..sources.detect import acpmf_tag_present, detect_running_game
+from ..sources.detect import (acc_process_present, acpmf_tag_present,
+                              detect_running_game)
 
 
 class DetectionView(QWidget):
@@ -77,7 +78,14 @@ class DetectionView(QWidget):
                 # forever. Until then, keep polling — the user might
                 # just need to unpause for the Kelvin fingerprint to
                 # appear and resolve to AC Rally.
-                if acpmf_tag_present():
+                #
+                # Require a live ACC process too, not just the tag: the
+                # acpmf_* mapping can linger after a game crashes or be
+                # held open by another tool, and committing to ACC on a
+                # stale tag detects a game that isn't running. A real ACC
+                # at its main menu still has its process up, so this only
+                # rejects the phantom case.
+                if acpmf_tag_present() and acc_process_present():
                     now = time.monotonic()
                     if self._acpmf_first_seen is None:
                         self._acpmf_first_seen = now

@@ -30,3 +30,5 @@ Thumbs.db
 # frozen .exe writes them next to itself — see overlay.paths).
 positions.json
 logs/
+
+.claude/

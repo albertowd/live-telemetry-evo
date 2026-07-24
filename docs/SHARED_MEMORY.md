@@ -8,7 +8,7 @@
 This document is a consolidated transcription of the publicly available
 information about AC EVO's shared-memory layout, cross-referenced with
 the live-telemetry overlay's own ctypes structs in
-[`src/overlay/sources/ac_evo.py`](../src/overlay/sources/ac_evo.py).
+[`src/live_telemetry_evo/sources/ac_evo.py`](../src/live_telemetry_evo/sources/ac_evo.py).
 
 The canonical upstream source is Kunos's official guide on Steam:
 **[Assetto Corsa EVO — Shared Memory documentation (#3707421508)](https://steamcommunity.com/sharedfiles/filedetails/?id=3707421508).**
@@ -51,7 +51,7 @@ is the wrong behaviour for "did the game start yet?": you'd silently
 attach to an empty mapping and read zeros. Use Win32
 `OpenFileMappingW` directly — it returns `NULL` (with
 `ERROR_FILE_NOT_FOUND == 2`) when the name does not exist. See
-[`_NamedMapping`](../src/overlay/sources/ac_evo.py) for the canonical
+[`_NamedMapping`](../src/live_telemetry_evo/sources/ac_evo.py) for the canonical
 read-only attach.
 
 The `Local\` prefix is mandatory in the API call. Some references show
@@ -923,23 +923,23 @@ and exposes three modes for layout investigation:
 
 ```bash
 # Parsed view of every field the overlay knows about, refreshing every 1 s.
-python -m overlay.sources.dump physics  --parsed --watch 1.0
-python -m overlay.sources.dump graphics --parsed --watch 1.0
-python -m overlay.sources.dump static   --parsed
+python -m live_telemetry_evo.sources.dump physics  --parsed --watch 1.0
+python -m live_telemetry_evo.sources.dump graphics --parsed --watch 1.0
+python -m live_telemetry_evo.sources.dump static   --parsed
 
 # Raw hex window — first 256 bytes.
-python -m overlay.sources.dump physics --bytes 256
+python -m live_telemetry_evo.sources.dump physics --bytes 256
 
 # List every aligned float in [LO, HI].
 # Pick a range tight enough to rule out padding (e.g. tyre wear lives
 # in [0, 1], brake disc temp in [50, 900]). Run twice with different
 # real-world states; offsets that changed are candidates.
-python -m overlay.sources.dump physics --scan 0.5 1.0
+python -m live_telemetry_evo.sources.dump physics --scan 0.5 1.0
 
 # Sample over DURATION_S; report aligned floats that only ever
 # decreased and stayed in [LO, HI]. True wear / monotonic counters
 # pop out cleanly.
-python -m overlay.sources.dump physics --track-monotonic 60 0.5 1.0
+python -m live_telemetry_evo.sources.dump physics --track-monotonic 60 0.5 1.0
 ```
 
 Recommended workflow when extending the layout for a new field:
@@ -949,7 +949,7 @@ Recommended workflow when extending the layout for a new field:
 2. Confirm with a second `--scan` after you've changed the real-world
    value — only the matching offset should track.
 3. Add the field to the corresponding ctypes struct in
-   [`src/overlay/sources/ac_evo.py`](../src/overlay/sources/ac_evo.py).
+   [`src/live_telemetry_evo/sources/ac_evo.py`](../src/live_telemetry_evo/sources/ac_evo.py).
    Keep `_pack_ = 4` and put the field at the documented offset; if
    inserting mid-struct, the size of the surrounding fields must stay
    correct or every offset after it shifts.
@@ -987,11 +987,11 @@ Tips for safe iteration:
   (`speedKmh: f32`, `rpms: i32`, `gear: i32`,
   `fuel_liter_current_quantity: f32`, etc.).
 * **This repository:**
-    * [`src/overlay/sources/ac_evo.py`](../src/overlay/sources/ac_evo.py)
+    * [`src/live_telemetry_evo/sources/ac_evo.py`](../src/live_telemetry_evo/sources/ac_evo.py)
       — ctypes structs + apply functions; the source of truth for
       this overlay.
-    * [`src/overlay/sources/dump.py`](../src/overlay/sources/dump.py)
+    * [`src/live_telemetry_evo/sources/dump.py`](../src/live_telemetry_evo/sources/dump.py)
       — dump / scan / monotonic-track tool used to validate offsets.
-    * [`src/overlay/telemetry.py`](../src/overlay/telemetry.py)
+    * [`src/live_telemetry_evo/telemetry.py`](../src/live_telemetry_evo/telemetry.py)
       — `TelemetryFrame` / `EngineData` / `WheelData` / `InputsData`,
       the abstracted shape the rest of the overlay consumes.

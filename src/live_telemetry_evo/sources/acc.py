@@ -53,7 +53,6 @@ from __future__ import annotations
 
 import ctypes
 import math
-import sys
 from ctypes import c_float, c_int32, c_wchar
 from typing import Optional
 
@@ -61,6 +60,7 @@ from PySide6.QtCore import QObject, QTimer
 
 from ..interpolation import (Curve, DEFAULT_BRAKE_TEMP_CURVE,
                               DEFAULT_TIRE_TEMP_CURVE)
+from ..logbook import log
 from ..telemetry import TelemetryFrame, WHEEL_IDS
 from ._win32_mapping import NamedMapping
 from .base import TelemetrySource
@@ -420,11 +420,11 @@ class AccTelemetrySource(TelemetrySource):
         try:
             self._reader.open()
             self._apply_static(self._reader.read_static())
-            print("[acc] connected to shared memory")
+            log("[acc] connected to shared memory")
             return True
         except (OSError, RuntimeError) as exc:
             if not isinstance(exc, FileNotFoundError):
-                print(f"[acc] connect failed: {exc}", file=sys.stderr)
+                log(f"[acc] connect failed: {exc}")
             return False
 
     def _tick(self) -> None:
@@ -441,7 +441,7 @@ class AccTelemetrySource(TelemetrySource):
             phys = self._reader.read_physics()
             graphics = self._reader.read_graphics()
         except (OSError, ValueError) as exc:
-            print(f"[acc] read failed, dropping connection: {exc}", file=sys.stderr)
+            log(f"[acc] read failed, dropping connection: {exc}")
             self._reader.close()
             return
 

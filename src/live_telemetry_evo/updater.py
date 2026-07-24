@@ -1,10 +1,11 @@
 """Async update check against GitHub releases.
 
 On startup the app queries
-``https://api.github.com/repos/albertowd/live-telemetry-evo/releases/latest``
-and, if the tag is newer than the running version, downloads the
-matching ``LiveTelemetryEvo-<version>.exe`` asset into the same folder
-as the running executable. The user sees a system-tray balloon when
+``https://github.com/albertowd/live-telemetry-evo/releases/latest`` (the
+releases page serves the latest tag as JSON) and, if the tag is newer
+than the running version, downloads the matching
+``LiveTelemetryEvo-<version>.exe`` asset into the same folder as the
+running executable. The user sees a system-tray balloon when
 the download finishes; failures are silent.
 
 Re-downloads are skipped — if a file with the asset's filename already
@@ -31,10 +32,16 @@ from typing import Optional
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import QApplication
 
+from .logbook import log
 
-GITHUB_API_LATEST = (
-    "https://api.github.com/repos/albertowd/live-telemetry-evo/releases/latest"
-)
+
+# The check deliberately avoids ``api.github.com`` — it's unreachable on
+# some networks where ``github.com`` itself works (DNS interception /
+# filtering). ``<releases>/latest`` returns ``{"tag_name": ...}`` when
+# asked for JSON; the asset URL (``<releases>/download/<tag>/<asset>``)
+# is rebuilt from the release naming convention since the page JSON
+# carries no asset list.
+GITHUB_RELEASES_URL = "https://github.com/albertowd/live-telemetry-evo/releases"
 HTTP_TIMEOUT_S = 10
 USER_AGENT = "live-telemetry-evo-updater"
 
@@ -157,10 +164,24 @@ class UpdateChecker(QObject):
 
     @staticmethod
     def _fetch_latest() -> dict:
+        payload = UpdateChecker._fetch_json(f"{GITHUB_RELEASES_URL}/latest")
+        tag = (payload.get("tag_name") or "").strip()
+        version = tag.lstrip("vV")
+        if version:
+            name = f"LiveTelemetryEvo-{version}.exe"
+            payload.setdefault("assets", [{
+                "name": name,
+                "browser_download_url":
+                    f"{GITHUB_RELEASES_URL}/download/{tag}/{name}",
+            }])
+        return payload
+
+    @staticmethod
+    def _fetch_json(url: str) -> dict:
         req = urllib.request.Request(
-            GITHUB_API_LATEST,
+            url,
             headers={
-                "Accept": "application/vnd.github+json",
+                "Accept": "application/json",
                 "User-Agent": USER_AGENT,
             },
         )
@@ -265,7 +286,7 @@ class UpdateController(QObject):
         if self._state != self.IDLE:
             return
         if not self._current:
-            print("[updater] skipped: could not determine current version")
+            log("[updater] skipped: could not determine current version")
             return
 
         self._set_state(self.CHECKING)
@@ -301,7 +322,7 @@ class UpdateController(QObject):
             # File was deleted between download and click — degrade
             # gracefully by reverting to IDLE so a fresh check can
             # re-download it.
-            print(f"[updater] restart target missing: {path}")
+            log(f"[updater] restart target missing: {path}")
             self._restart_path = None
             self._set_state(self.IDLE, "restart target missing")
             return False
@@ -322,10 +343,10 @@ class UpdateController(QObject):
                 creationflags=flags,
             )
         except OSError as e:
-            print(f"[updater] failed to launch {path}: {e}")
+            log(f"[updater] failed to launch {path}: {e}")
             return False
 
-        print(f"[updater] launched {path} — quitting current app")
+        log(f"[updater] launched {path} — quitting current app")
         app = QApplication.instance()
         if app is not None:
             app.quit()
@@ -338,26 +359,26 @@ class UpdateController(QObject):
         self.state_changed.emit(new_state, detail)
 
     def _on_download_started(self, tag: str) -> None:
-        print(f"[updater] new release {tag} — downloading")
+        log(f"[updater] new release {tag} — downloading")
         self._set_state(self.DOWNLOADING, tag)
 
     def _on_download_finished(self, tag: str, path: str) -> None:
-        print(f"[updater] downloaded {tag} -> {path}")
+        log(f"[updater] downloaded {tag} -> {path}")
         self._restart_path = path
         self._set_state(self.READY, tag)
         self.download_finished.emit(tag, path)
 
     def _on_already_present(self, tag: str, path: str) -> None:
-        print(f"[updater] {tag} already on disk at {path}")
+        log(f"[updater] {tag} already on disk at {path}")
         self._restart_path = path
         self._set_state(self.READY, tag)
 
     def _on_up_to_date(self, tag: str) -> None:
-        print(f"[updater] up to date (latest={tag}, current={self._current})")
+        log(f"[updater] up to date (latest={tag}, current={self._current})")
         self._set_state(self.IDLE, tag)
 
     def _on_failed(self, reason: str) -> None:
-        print(f"[updater] check failed: {reason}")
+        log(f"[updater] check failed: {reason}")
         # Failure always lands back in IDLE so the user can re-trigger
         # — including failures during the DOWNLOADING phase.
         self._set_state(self.IDLE, reason)

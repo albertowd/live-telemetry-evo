@@ -36,8 +36,9 @@ and screenshots.
 1. Go to the releases page the download the latest version from [GitHub](https://github.com/albertowd/live-telemetry-evo/releases) or [Overtake.gg](https://www.overtake.gg/downloads/live-telemetry-evo.84121/).
 2. Double-click on it with the session already running so it auto detects which
    game to load the data from.
-3. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+C` to start/stop
-   logging, `Ctrl+Alt+Q` to quit.
+3. Use `Ctrl+Shift+C` (or **Windows → Click-through** in the tray) to unlock
+   for repositioning, `Ctrl+Shift+L` to start/stop logging, and `Ctrl+Shift+Q`
+   to quit.
 
 ### Option B — run the prebuilt executable
 
@@ -47,8 +48,9 @@ and screenshots.
 3. Start any supported Assetto Corsa title. The overlay auto-detects which game
    is running and attaches as soon as it publishes shared memory; the
    *Detecting AC Environment...* screen stays up until then.
-4. Use `Ctrl+Alt+L` to unlock for repositioning, `Ctrl+Alt+C` to start/stop
-   logging, `Ctrl+Alt+Q` to quit.
+4. Use `Ctrl+Shift+C` (or **Windows → Click-through** in the tray) to unlock
+   for repositioning, `Ctrl+Shift+L` to start/stop logging, and `Ctrl+Shift+Q`
+   to quit.
 
 ### Option A — run from source
 
@@ -58,7 +60,7 @@ The project uses a local virtual environment so it does not touch the system Pyt
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python -m overlay
+python -m live_telemetry_evo
 ```
 
 Or use `run.bat`, which uses the venv's Python directly (no activation needed).
@@ -66,14 +68,16 @@ Or use `run.bat`, which uses the venv's Python directly (no activation needed).
 ### Command-line flags
 
 ```bash
-python -m overlay                      # default — auto-detect the running game
-python -m overlay --source ac-evo      # force Assetto Corsa Evo
-python -m overlay --source acc         # force Assetto Corsa Competizione
-python -m overlay --source acrally     # force Assetto Corsa Rally
-python -m overlay --source ac1         # force original Assetto Corsa
-python -m overlay --source synthetic   # animated mock data, no game required
-python -m overlay --hz 120             # one-shot override; 0 (default) uses the
+python -m live_telemetry_evo                      # default — auto-detect the running game
+python -m live_telemetry_evo --source ac-evo      # force Assetto Corsa Evo
+python -m live_telemetry_evo --source acc         # force Assetto Corsa Competizione
+python -m live_telemetry_evo --source acrally     # force Assetto Corsa Rally
+python -m live_telemetry_evo --source ac1         # force original Assetto Corsa
+python -m live_telemetry_evo --source synthetic   # animated mock data, no game required
+python -m live_telemetry_evo --hz 120             # one-shot override; 0 (default) uses the
                                        # persisted tray choice (default 60)
+python -m live_telemetry_evo --vr                 # force the VR overlay on (SteamVR)
+python -m live_telemetry_evo --novr               # force VR off (pure desktop overlay)
 ```
 
 The polling rate is **persisted across sessions** (`30 / 60 / 100 / 120 / 144 /
@@ -93,6 +97,44 @@ their reader immediately.
 tag names (`Local\acpmf_*`) — only one of those games can run at a time
 anyway, and the `--source` flag tells the overlay which struct layout to
 apply. Attaching with the wrong layout reads garbage values.
+
+### VR (SteamVR / OpenVR)
+
+A plain always-on-top desktop window is invisible inside a headset — the VR
+compositor draws the game straight to the HMD and ignores desktop windows. So
+in VR the overlay submits the HUD to the **SteamVR (OpenVR) compositor** — each
+widget as its own overlay quad, placed on a gentle cylinder that wraps around
+the viewer so the assembly keeps the desktop layout (and each quad uploads only
+its own pixels at native resolution). One backend covers every PCVR
+headset that runs through SteamVR: a **Pimax** (PiTool → SteamVR) and a **Meta
+Quest 3** (Link / Air Link / Steam Link / Virtual Desktop → SteamVR) look
+identical from here. The game still runs on the PC — this is PCVR, not the
+Quest's standalone mode.
+
+VR mode is resolved from the CLI flags, defaulting to auto-detect:
+
+| Invocation      | Behaviour                                                              |
+|-----------------|-----------------------------------------------------------------------|
+| *(none)*        | **Auto** — poll for a running SteamVR runtime + connected HMD and turn the VR overlay on automatically when both are present. |
+| `--vr`          | Force VR on now. Falls back to the desktop overlay (with a log line) if SteamVR / the OpenVR runtime isn't available. |
+| `--novr`        | Force VR off, disabling auto-detection — pure desktop overlay.         |
+
+The HUD quad's placement is chosen from the **VR placement** tray submenu and
+persisted across sessions:
+
+- **Head-locked** (default) — the panel follows your gaze, fixed in front of
+  the eyes. Never jitters and is always visible; the safe choice across
+  headsets.
+- **Fixed in place** — the panel freezes in the play space exactly where it
+  floats at the moment you select the mode: look where you want it, click the
+  entry, and it stays there. Re-selecting it re-anchors at your current gaze.
+  More immersive, but OpenVR world-locking can jitter on some streamed-link
+  setups (notably Quest).
+
+Switching placement updates the live overlay without a restart. The OpenVR
+binding (`openvr` / pyopenvr) ships inside the released `.exe`; the import is
+guarded, so machines without it or without SteamVR simply run the desktop
+overlay as before.
 
 ### Per-game support matrix
 
@@ -176,30 +218,84 @@ is in [`docs/SHARED_MEMORY.md`](docs/SHARED_MEMORY.md).
 
 ### Hotkeys (registered globally)
 
-| Shortcut     | Action                                                              |
-| ------------ | ------------------------------------------------------------------- |
-| `Ctrl+Alt+L` | Toggle click-through (lock / unlock the overlay for repositioning). |
-| `Ctrl+Alt+R` | Reset every widget to its default position and visibility.          |
-| `Ctrl+Alt+S` | Cycle widget size: `XS → S → M → L → XL → XS …`. Persists.          |
-| `Ctrl+Alt+C` | Start / stop CSV logging of every telemetry frame.                  |
-| `Ctrl+Alt+Q` | Quit the overlay.                                                   |
+| Shortcut       | Action                                                              |
+| -------------- | ------------------------------------------------------------------- |
+| `Ctrl+Shift+R` | Reset every widget to its default position and visibility.          |
+| `Ctrl+Shift+C` | Toggle click-through (lock / unlock the overlay for dragging).      |
+| `Ctrl+Shift+S` | Cycle widget size `XS → S → M → L → XL` (wraps around).             |
+| `Ctrl+Shift+L` | Start / stop CSV logging of every telemetry frame.                  |
+| `Ctrl+Shift+P` | VR: toggle placement (Head-locked ↔ Fixed in place).                |
+| `Ctrl+Shift+W` | VR: cycle panel spread / width (wraps around).                      |
+| `Ctrl+Shift+D` | VR: cycle panel distance (wraps around).                            |
+| `Ctrl+Shift+Q` | Quit the overlay.                                                   |
 
 These use Win32 `RegisterHotKey`, so they fire even while the game has focus.
+Each hotkey shares one code path with its tray-menu entry and is gated by the
+same state that enables that entry — a key does nothing while its menu item is
+greyed out:
+
+- **Reset / Click-through / Size** act on the overlay widgets, so they wait
+  until the widgets are placed (after the detection countdown reveals them).
+- **Logging** waits until a game is detected and telemetry is flowing.
+- **VR Placement / Spread / Distance** only act while the HUD is being
+  rendered into a headset.
+- **Quit** is always available.
+
+Every global combo the overlay holds is one another application can collide
+with while the overlay runs — `Ctrl+Shift+D` / `W` / `P` in particular overlap
+common browser shortcuts, and won't reach the foreground app until the overlay
+exits. Registration is per-key: if one combo is already taken on your machine,
+the overlay logs which one (`hotkey Ctrl+Shift+R unavailable (err=1409)`) and
+the rest keep working — use the tray menu for the affected action.
 
 ### System-tray icon
 
 The overlay registers an icon in the Windows notification area. Left- or right-click
-it to open a menu mirroring the hotkeys above:
+it to open a menu organised into three categories — **Data**, **VR**, **Windows**
+— followed by the update and quit entries. Each category greys out until it can
+actually do something (the same gating the hotkeys follow, above).
 
-- **Reset positions** — restores the default layout.
-- **Click-through** — checkable; reflects current state.
-- **Size** — submenu with `XS / S / M / L / XL` as a radio group.
+Within every menu the entries are ordered alphabetically by label; the
+value-scale submenus (Polling Hz, Distance, Spread, Size) keep their natural
+numeric / scale order.
+
+**Data** — enabled once a game is detected and telemetry is flowing:
+
+- **Open logs folder** — opens the directory holding the CSV files
+  alongside the executable.
 - **Polling Hz** — submenu with `30 / 60 / 100 / 120 / 144 / 250` Hz as a
   radio group; controls the shared-memory poll rate and the CSV row rate.
 - **Start logging / Stop logging** — toggles CSV capture of every
   telemetry frame (raw + calculated) to `logs/<timestamp>_<source>.csv`.
-- **Open logs folder** — opens the directory holding the CSV files
-  alongside the executable.
+
+**VR** — enabled only while the HUD is being rendered into a headset:
+
+- **Distance** — submenu of distances (`1.0 … 2.0 m`); how far the whole panel
+  floats from the viewer (the cylinder radius).
+- **Placement** — submenu (`Fixed in place` / `Head-locked` radio group) for
+  where the HUD quad floats in the headset. Persists; updates the live overlay
+  without a restart. Re-selecting *Fixed in place* re-anchors the panel at your
+  current gaze.
+- **Size** — the same `XS / S / M / L / XL` radio group as under **Windows**;
+  scaling the HUD applies in the headset too.
+- **Spread** — submenu of width factors (`40% … 120%`); how wide the widgets
+  fan out sideways around the cylinder (lower pulls the corner widgets toward
+  the centre of view).
+- **Widgets** — submenu with a checkable entry per panel (Engine, Inputs, and
+  the four wheels) to show or hide each one; the choice persists.
+
+**Windows** — enabled once the widgets are placed (after the countdown):
+
+- **Click-through** — checkable; reflects current state.
+- **Reset positions** — restores the default layout. The **Inputs** widget is
+  hidden by default, so reset restores its position but leaves it hidden — use
+  **Widgets** to bring it up.
+- **Size** — submenu with `XS / S / M / L / XL` as a radio group.
+- **Widgets** — the same per-panel show/hide toggles as under **VR** (one set
+  of flags backs both menus and the desktop and headset views).
+
+Then, always available:
+
 - **Check for Updates** — manual re-trigger of the GitHub-releases
   check (also fires automatically on launch). The label tracks state:
   `Check for Updates` (idle, clickable) → `Checking updates...`
@@ -208,12 +304,16 @@ it to open a menu mirroring the hotkeys above:
   .exe and quits the current one). Failures revert to the idle label.
 - **Quit** — exits the overlay.
 
-Each menu entry that maps to a hotkey shows it alongside the label.
+Each menu entry or submenu that maps to a hotkey shows it alongside the label
+(the VR and Size submenus carry the hint of the hotkey that *cycles* through
+their entries).
 
 ### Auto-update
 
 On launch the overlay asynchronously queries
-`api.github.com/repos/albertowd/live-telemetry-evo/releases/latest`.
+`github.com/albertowd/live-telemetry-evo/releases/latest` (which serves
+the latest tag as JSON — `api.github.com` is deliberately avoided since
+some networks block it).
 If the tag is newer than the running version it downloads the matching
 `LiveTelemetryEvo-<version>.exe` asset into the folder next to the
 running executable, then surfaces a tray balloon — and flips the tray
@@ -254,19 +354,22 @@ during dev, named `YYYY-MM-DD_HHMMSS_<source>.csv`.
 | Drag a widget             | Move it; position is persisted across sessions.     |
 | Click the `×` on a widget | Hide it; the hidden state persists across sessions. |
 
-If you hide everything, `Ctrl+Alt+R` (or *Reset positions* in the tray) brings the
+If you hide everything, `Ctrl+Shift+R` (or *Reset positions* in the tray) brings the
 whole layout back.
 
 ### Startup behaviour
 
 - **Click-through is ON by default** so the overlay never steals mouse input from the
-  game. Toggle it off (`Ctrl+Alt+L`) only when you want to drag widgets.
+  game. Toggle it off with `Ctrl+Shift+C` (or tray → **Windows → Click-through**)
+  only when you want to drag widgets.
 - A 5-second countdown is drawn full-screen before the telemetry widgets reveal,
   showing the **detected game name** above the digit and reusing the
   detection-screen font size so the two screens flow as one. The source still
   feeds frames during the countdown so values are live the moment the widgets
   appear.
-- Widgets you hid in a previous session stay hidden; `Ctrl+Alt+R` brings them back.
+- Widgets you hid in a previous session stay hidden; the tray **Widgets** submenu
+  (under **Windows** or **VR**) toggles any panel back, and `Ctrl+Shift+R` restores
+  the default layout (the **Inputs** widget stays hidden — show it from **Widgets**).
 
 ---
 
@@ -447,7 +550,7 @@ them in the same Explorer window the app was launched from — no
 
 - **Frozen build (.exe)** — `<exe-dir>\positions.json` and
   `<exe-dir>\logs\*.csv`.
-- **Dev (`python -m overlay`)** — current working directory; both paths
+- **Dev (`python -m live_telemetry_evo`)** — current working directory; both paths
   are git-ignored.
 - **Override** — set `LIVE_TELEMETRY_DATA_DIR=<abs-path>` to redirect
   both (useful for a portable install on a shared machine).
@@ -465,7 +568,7 @@ them in the same Explorer window the app was launched from — no
 
 A position is honoured on next launch only if the widget would land fully on screen
 at the current resolution; otherwise it falls back to the layout default. *Reset*
-(hotkey `Ctrl+Alt+R` or the tray entry) wipes the telemetry-widget entries; the
+(hotkey `Ctrl+Shift+R` or the tray entry) wipes the telemetry-widget entries; the
 persisted `size_index` and `polling_hz` are preserved and only change via their
 own controls.
 
@@ -520,12 +623,12 @@ When the game is running, dump real bytes / parsed fields to verify the struct
 layout or hunt unknown offsets:
 
 ```bash
-python -m overlay.sources.dump physics --parsed
-python -m overlay.sources.dump graphics --parsed
-python -m overlay.sources.dump static  --parsed --watch 1.0
-python -m overlay.sources.dump physics --bytes 256                # raw hex window
-python -m overlay.sources.dump physics --scan 0.5 1.0             # aligned floats in [LO,HI]
-python -m overlay.sources.dump physics --track-monotonic 60 0.5 1.0   # 60 s, find wear-like fields
+python -m live_telemetry_evo.sources.dump physics --parsed
+python -m live_telemetry_evo.sources.dump graphics --parsed
+python -m live_telemetry_evo.sources.dump static  --parsed --watch 1.0
+python -m live_telemetry_evo.sources.dump physics --bytes 256                # raw hex window
+python -m live_telemetry_evo.sources.dump physics --scan 0.5 1.0             # aligned floats in [LO,HI]
+python -m live_telemetry_evo.sources.dump physics --track-monotonic 60 0.5 1.0   # 60 s, find wear-like fields
 ```
 
 The `--scan` and `--track-monotonic` modes are useful when AC Evo extends the layout
@@ -536,11 +639,11 @@ and the overlay needs to be re-pointed at a moved field.
 ## Project layout
 
 ```
-src/overlay/
-├── __main__.py                # `python -m overlay` entry point
+src/live_telemetry_evo/
+├── __main__.py                # `python -m live_telemetry_evo` entry point
 ├── app.py                     # CLI parsing, layout + size cycling, threads the source
 ├── window.py                  # frameless / translucent / always-on-top window + Win32 hotkeys
-├── tray.py                    # system-tray icon + context menu (reset / click-through / size / Hz / logging / update / quit)
+├── tray.py                    # system-tray icon + context menu (Data: Hz / logging; VR: placement / spread / distance; Windows: reset / click-through / size; update / quit)
 ├── updater.py                 # async GitHub-releases check + state-machine controller (idle / checking / downloading / restart)
 ├── layout.py                  # screen-size → multiplier and corner placements
 ├── settings.py                # JSON-backed positions / visibility / size / polling-Hz persistence
@@ -561,7 +664,10 @@ src/overlay/
 │   ├── acc.py                 # Assetto Corsa Competizione shared-memory reader
 │   ├── acrally.py             # Assetto Corsa Rally shared-memory reader
 │   ├── _win32_mapping.py      # NamedMapping (OpenFileMappingW) shared by all live readers
-│   └── dump.py                # `python -m overlay.sources.dump` for SHM debugging
+│   └── dump.py                # `python -m live_telemetry_evo.sources.dump` for SHM debugging
+├── vr/
+│   ├── detect.py              # SteamVR-running + HMD-present probes (auto-enable signal)
+│   └── overlay_output.py      # VROverlayOutput — OpenVR overlay quad: lifecycle, placement, RGBA submit
 └── widgets/
     ├── countdown.py           # post-detection countdown — shows detected game name + digit
     ├── detection.py           # full-screen "Detecting AC Environment..." poller
@@ -584,8 +690,13 @@ the live AC Evo reader (or any future source) does not touch any UI code.
   rather than crashy. If a field looks suspicious for a particular car, run the dump
   tool against a live session and confirm offsets before adjusting.
 - **Click-through default is ON.** This is deliberate — a full-screen overlay must
-  not steal mouse input from the game. Toggle it off with `Ctrl+Alt+L` before trying
-  to drag a widget.
+  not steal mouse input from the game. Toggle it off with `Ctrl+Shift+C` (or from
+  the tray menu, **Windows → Click-through**) before trying to drag a widget.
+- **VR quad geometry is tunable.** The panel size and head-locked offset live in
+  labelled constants at the top of `src/live_telemetry_evo/vr/overlay_output.py` (`WIDTH_M`,
+  `HEAD_DISTANCE_M`, `HEAD_DOWN_M`) — the first things to adjust if the panel feels
+  too large or too close in a given headset. *Fixed in place* uses the same offset
+  relative to where you're looking when the mode is selected.
 
 ---
 
@@ -594,6 +705,6 @@ the live AC Evo reader (or any future source) does not touch any UI code.
 This project was kicked off by Kunos's official AC Evo shared-memory guide on
 Steam:
 [**Assetto Corsa EVO — Shared Memory documentation**](https://steamcommunity.com/sharedfiles/filedetails/?id=3707421508).
-The struct layouts in `src/overlay/sources/ac_evo.py` are transcribed straight
+The struct layouts in `src/live_telemetry_evo/sources/ac_evo.py` are transcribed straight
 from that guide — every field name and offset there comes from this thread. If
 you want to extend the overlay with new fields, that's the canonical reference.

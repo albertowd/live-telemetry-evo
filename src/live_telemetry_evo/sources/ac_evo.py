@@ -29,13 +29,12 @@ The fields that are confirmed verbatim in the public sources are wired into
 :class:`TelemetryFrame`. Anything still uncertain is read defensively (with
 range clamps) so a wrong offset produces a visible-but-bounded value rather
 than a crash. Once the user runs the dump tool against a live session
-(``python -m overlay.sources.dump``) and confirms real offsets, this file is
+(``python -m live_telemetry_evo.sources.dump``) and confirms real offsets, this file is
 the only place that needs adjusting.
 """
 from __future__ import annotations
 
 import ctypes
-import sys
 import time
 from ctypes import (c_bool, c_byte, c_char, c_float, c_int8, c_int16, c_int32,
                     c_uint8, c_uint16, c_uint32, c_uint64)
@@ -44,6 +43,7 @@ from typing import Optional
 from PySide6.QtCore import QObject, QTimer
 
 from ..interpolation import Curve, DEFAULT_BRAKE_TEMP_CURVE
+from ..logbook import log
 from ..telemetry import TelemetryFrame, WHEEL_IDS
 from ._win32_mapping import NamedMapping as _NamedMapping
 from .base import TelemetrySource
@@ -743,13 +743,13 @@ class AcEvoTelemetrySource(TelemetrySource):
         try:
             self._reader.open()
             self._apply_static(self._reader.read_static())
-            print("[ac-evo] connected to shared memory")
+            log("[ac-evo] connected to shared memory")
             return True
         except (OSError, RuntimeError) as exc:
             # File-not-found is the common "game not running" case; surface
             # other errors so misconfiguration is debuggable.
             if not isinstance(exc, FileNotFoundError):
-                print(f"[ac-evo] connect failed: {exc}", file=sys.stderr)
+                log(f"[ac-evo] connect failed: {exc}")
             return False
 
     def _tick(self) -> None:
@@ -768,7 +768,7 @@ class AcEvoTelemetrySource(TelemetrySource):
             phys = self._reader.read_physics()
             graphics = self._reader.read_graphics()
         except (OSError, ValueError) as exc:
-            print(f"[ac-evo] read failed, dropping connection: {exc}", file=sys.stderr)
+            log(f"[ac-evo] read failed, dropping connection: {exc}")
             self._reader.close()
             return
 

@@ -82,6 +82,13 @@ class DraggableWidget(QWidget):
             self._close_btn.clicked.connect(self.closed)
             self._close_btn.raise_()
 
+    def set_close_visible(self, visible: bool) -> None:
+        """Show/hide the ``×`` button. Hidden when the HUD is mirrored to
+        VR — the grab would bake the button into the headset quad, and
+        there is no pointer there to click it."""
+        if self._close_btn is not None:
+            self._close_btn.setVisible(visible)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self._close_btn is not None:

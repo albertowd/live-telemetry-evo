@@ -27,7 +27,7 @@ SIZE = 256
 ICONIFY_URL = "https://api.iconify.design/mdi/{name}.svg"
 
 # Engine-widget MDI mapping. Keep in sync with ``_draw_aids`` /
-# ``_draw_readouts`` in ``src/overlay/widgets/engine_view.py``.
+# ``_draw_readouts`` in ``src/live_telemetry_evo/widgets/engine_view.py``.
 ICONS: tuple[str, ...] = (
     # Phase 1 — driver-aid / status chips
     "car-speed-limiter",        # PIT

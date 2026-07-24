@@ -144,6 +144,34 @@ def acpmf_tag_present() -> bool:
     return _tag_exists("Local\\acpmf_static")
 
 
+def acc_process_present() -> bool:
+    """Public helper: is an ACC process actually running (including the
+    Unreal-Engine shipping binary it may share with AC Rally)?
+
+    The ACC fallback in :class:`DetectionView` fires when the ``acpmf_*``
+    tag is up but the physics block is zero-filled (menu / paused), which
+    can't tell ACC from AC Rally. Gating that fallback on a live ACC
+    process stops a *stale* ``acpmf_*`` mapping — left behind by a crashed
+    game or held open by another tool (SimHub, Content Manager, …) — from
+    being mistaken for a running ACC when nothing is actually up.
+    """
+    return is_process_running(_ACC_PROCESS_NAMES)
+
+
+def is_process_running(names: tuple[str, ...]) -> bool:
+    """Return True if any process whose EXE basename matches one of
+    ``names`` (case-insensitive, substring match) is currently running.
+
+    Thin public wrapper around the toolhelp snapshot used for game
+    detection so other subsystems (e.g. ``overlay.vr.detect``) can probe
+    for a process — like SteamVR's ``vrserver.exe`` — without duplicating
+    the Win32 plumbing. Returns False on non-Windows or if the snapshot
+    fails (callers must treat that as "unknown", not "definitely off").
+    """
+    procs = _running_processes()
+    return any(any(n in p for n in names) for p in procs)
+
+
 def _running_processes() -> list[str]:
     """Return lower-cased EXE basenames of every process currently running.
 
@@ -205,6 +233,15 @@ def detect_running_game() -> str | None:  # pylint: disable=too-many-return-stat
         return "acrally"
     if any(p in procs for p in _AC1_PROCESS_NAMES):
         return "ac1"
+    # From here only the shared ACC / AC-Rally shipping binary is left to
+    # identify by physics content. Require that binary to actually be
+    # running first: the acpmf_* mapping — and the last physics frame the
+    # game wrote into it — can linger after the game exits or be held open
+    # by another tool (Content Manager, SimHub). Without this gate a stale
+    # tyreCoreTemp still sitting in a plausible Celsius range reads as a
+    # live ACC when nothing is running. See acc_process_present().
+    if not any(any(n in p for n in _ACC_PROCESS_NAMES) for p in procs):
+        return None
     # ACC and AC Rally sometimes ship under the same Unreal Engine
     # shipping binary, so process hints can't always tell them apart.
     # Peek at tyreCoreTemp[0]: Kelvin (≈ 290–360) → AC Rally, plausible
@@ -221,4 +258,5 @@ def detect_running_game() -> str | None:  # pylint: disable=too-many-return-stat
     return None
 
 
-__all__ = ["detect_running_game"]
+__all__ = ["detect_running_game", "acpmf_tag_present", "acc_process_present",
+           "is_process_running"]

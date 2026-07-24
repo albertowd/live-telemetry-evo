@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import ctypes
 import math
-import sys
 import time
 from ctypes import c_float, c_int32, c_wchar
 from typing import Optional
@@ -49,6 +48,7 @@ from typing import Optional
 from PySide6.QtCore import QObject, QTimer
 
 from ..interpolation import Curve, DEFAULT_TIRE_TEMP_CURVE
+from ..logbook import log
 from ..telemetry import TelemetryFrame, WHEEL_IDS
 from ._win32_mapping import NamedMapping
 from .ac1_acd import ACD
@@ -353,11 +353,11 @@ class AcTelemetrySource(TelemetrySource):
         try:
             self._reader.open()
             self._apply_static(self._reader.read_static())
-            print("[ac1] connected to shared memory")
+            log("[ac1] connected to shared memory")
             return True
         except (OSError, RuntimeError) as exc:
             if not isinstance(exc, FileNotFoundError):
-                print(f"[ac1] connect failed: {exc}", file=sys.stderr)
+                log(f"[ac1] connect failed: {exc}")
             return False
 
     def _tick(self) -> None:
@@ -374,7 +374,7 @@ class AcTelemetrySource(TelemetrySource):
             phys = self._reader.read_physics()
             graphics = self._reader.read_graphics()
         except (OSError, ValueError) as exc:
-            print(f"[ac1] read failed, dropping connection: {exc}", file=sys.stderr)
+            log(f"[ac1] read failed, dropping connection: {exc}")
             self._reader.close()
             return
 
@@ -451,9 +451,9 @@ class AcTelemetrySource(TelemetrySource):
             return
         try:
             self._acd = ACD(car_dir)
-            print(f"[ac1] loaded ACD for {car_model}")
+            log(f"[ac1] loaded ACD for {car_model}")
         except (OSError, ValueError) as exc:
-            print(f"[ac1] ACD load failed for {car_model}: {exc}", file=sys.stderr)
+            log(f"[ac1] ACD load failed for {car_model}: {exc}")
             self._acd = None
 
     def _refresh_engine_curves(self) -> None:

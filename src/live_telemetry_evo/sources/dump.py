@@ -2,11 +2,11 @@
 
 Usage::
 
-    python -m overlay.sources.dump physics
-    python -m overlay.sources.dump graphics --bytes 256
-    python -m overlay.sources.dump static --parsed
-    python -m overlay.sources.dump physics --validate --watch 0.5
-    python -m overlay.sources.dump physics --camber
+    python -m live_telemetry_evo.sources.dump physics
+    python -m live_telemetry_evo.sources.dump graphics --bytes 256
+    python -m live_telemetry_evo.sources.dump static --parsed
+    python -m live_telemetry_evo.sources.dump physics --validate --watch 0.5
+    python -m live_telemetry_evo.sources.dump physics --camber
 
 Designed for iterating on the struct layout: print a raw hex window, or
 parse with the best-effort structs and show the resulting field values, so
