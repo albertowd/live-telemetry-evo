@@ -55,7 +55,7 @@ EXCLUDED_MODULES = [
     "PySide6.QtDataVisualization", "PySide6.QtDBus", "PySide6.QtDesigner",
     "PySide6.QtHelp", "PySide6.QtLocation", "PySide6.QtMultimedia",
     "PySide6.QtMultimediaWidgets", "PySide6.QtNetwork", "PySide6.QtNetworkAuth",
-    "PySide6.QtNfc", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
+    "PySide6.QtNfc", "PySide6.QtOpenGLWidgets",
     "PySide6.QtPdf", "PySide6.QtPdfWidgets", "PySide6.QtPositioning",
     "PySide6.QtPrintSupport", "PySide6.QtQml", "PySide6.QtQuick",
     "PySide6.QtQuick3D", "PySide6.QtQuickControls2", "PySide6.QtQuickWidgets",
@@ -82,8 +82,7 @@ UNWANTED_BINARIES = (
     # QML / Quick — no QML in our code.
     "Qt6Qml.dll", "Qt6QmlModels.dll", "Qt6Quick.dll",
     "Qt6Quick3D.dll", "Qt6QuickControls2.dll", "Qt6QuickWidgets.dll",
-    # OpenGL widgets — unused.
-    "Qt6OpenGL.dll", "Qt6OpenGLWidgets.dll",
+    "Qt6OpenGLWidgets.dll",
     # QtNetwork only — Python's stdlib ssl module needs the
     # ``libcrypto-*.dll`` / ``libssl-*.dll`` pair too (used by
     # ``live_telemetry_evo.updater`` for HTTPS to the GitHub releases API), so

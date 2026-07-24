@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] - 2026-07-24
+
+### Fixed
+- Bundled `.exe` crashed at launch with `No module named 'PySide6.QtOpenGL'` — the build stripped `QtOpenGL`/`Qt6OpenGL.dll`, which the VR overlay imports at startup. Both are now kept in the bundle.
+
 ## [0.7.1] - 2026-07-23
 
 ### Added
@@ -140,6 +145,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
+[0.7.2]: https://github.com/albertowd/live-telemetry-evo/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.6...v0.7.1
 [0.7.0]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.5...v0.6.6
