@@ -102,8 +102,10 @@ apply. Attaching with the wrong layout reads garbage values.
 
 A plain always-on-top desktop window is invisible inside a headset — the VR
 compositor draws the game straight to the HMD and ignores desktop windows. So
-in VR the overlay submits the composited HUD to the **SteamVR (OpenVR)
-compositor** as a single flat overlay quad. One backend covers every PCVR
+in VR the overlay submits the HUD to the **SteamVR (OpenVR) compositor** — each
+widget as its own overlay quad, placed on a gentle cylinder that wraps around
+the viewer so the assembly keeps the desktop layout (and each quad uploads only
+its own pixels at native resolution). One backend covers every PCVR
 headset that runs through SteamVR: a **Pimax** (PiTool → SteamVR) and a **Meta
 Quest 3** (Link / Air Link / Steam Link / Virtual Desktop → SteamVR) look
 identical from here. The game still runs on the PC — this is PCVR, not the
