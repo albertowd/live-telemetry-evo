@@ -10,10 +10,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 - AC Rally was not detected at all (regression in 0.7.0) — its `acr.exe` process was missing from the detector's list of known executables.
 
 ### Changed
-- Game auto-detection now identifies the game **solely by its executable**, matched exactly against the running-process list: `AssettoCorsaEVO.exe`, `acs.exe`/`acs_x86.exe`, `acc.exe`/`AC2-Win64-Shipping.exe`, `acr.exe`. Also adds AC1's 32-bit `acs_x86.exe`, which was never matched.
-- Detection no longer inspects shared memory, and no longer guesses between ACC and AC Rally from tyre-temperature units. A stale `acpmf_*` mapping — left by a crashed game or held open by Content Manager / SimHub — is never mistaken for a running game.
-- A game sitting on its main menu is detected immediately, with no 10-second wait before the overlay commits to ACC.
-- The overlay now appears as soon as the game process starts rather than waiting for its first telemetry block; widgets show no data until the game publishes, and the readers connect on their own once it does.
+- Game auto-detection now identifies the game solely by its executable, matched exactly against the running-process list.
+- AC1's 32-bit `acs_x86.exe` is now recognised.
+- Detection no longer reads shared memory, and no longer tells ACC from AC Rally by tyre-temperature units.
+- A stale `acpmf_*` mapping is never mistaken for a running game.
+- A game on its main menu is detected immediately, with no 10-second wait before defaulting to ACC.
+- The overlay appears when the game process starts, not at its first telemetry frame; readers connect once it publishes.
 
 ## [0.7.2] - 2026-07-24
 
