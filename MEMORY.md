@@ -17,6 +17,7 @@ investigation history) see
 | Aspect | AC Evo | AC1 | ACC | AC Rally |
 |---|---|---|---|---|
 | **Tag namespace** | `Local\acevo_pmf_*` | `Local\acpmf_*` | `Local\acpmf_*` | `Local\acpmf_*` |
+| **Executable** | `AssettoCorsaEVO.exe` | `acs.exe`, `acs_x86.exe` | `acc.exe`, `AC2-Win64-Shipping.exe` | `acr.exe` |
 | **Physics size** | 800 B | 580 B | 800 B | 800 B |
 | **Graphics size** | ~7–8 kB | 296 B | 1588 B | 1588 B |
 | **Static size** | ~210 B | 684 B | 820 B | 820 B |
@@ -31,6 +32,19 @@ shared-memory tag names (`Local\acpmf_*`). Only one of those games can
 be running at a time, so collision in practice doesn't happen — but
 the user has to pick the parsing layout via `--source` because the
 struct layouts differ. Attaching with the wrong layout reads garbage.
+
+**Detection is by executable, and only by executable.** `--source auto`
+matches the **Executable** row above against the running-process list
+(exact basename, case-insensitive) and looks at nothing else. The tag
+can't distinguish AC1 / ACC / Rally, and it lingers after a crash or
+while Content Manager holds it open, so it is not consulted at all. A
+game counts as running from the moment its process appears; the readers
+retry until its shared memory shows up.
+
+Note `acr.exe` and `acs.exe` contain neither "rally" nor "corsa", so a
+descriptive guess matches nothing. Verify any new EXE name against a real
+install before adding it — a wrong name fails silently, with no second
+signal to fall back on.
 
 ---
 

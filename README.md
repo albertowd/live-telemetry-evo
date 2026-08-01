@@ -46,8 +46,8 @@ and screenshots.
    executable](#building-a-redistributable-executable)).
 2. Double-click `dist\LiveTelemetryEvo-<version>.exe`.
 3. Start any supported Assetto Corsa title. The overlay auto-detects which game
-   is running and attaches as soon as it publishes shared memory; the
-   *Detecting AC Environment...* screen stays up until then.
+   is running as soon as it launches; the *Detecting AC Environment...* screen
+   stays up until then.
 4. Use `Ctrl+Shift+C` (or **Windows → Click-through** in the tray) to unlock
    for repositioning, `Ctrl+Shift+L` to start/stop logging, and `Ctrl+Shift+Q`
    to quit.
@@ -87,11 +87,23 @@ independently at the display refresh rate (`QScreen.refreshRate()`), so faster
 polling never makes the widgets paint more often than your monitor can show.
 
 In `auto` mode the overlay shows a *Detecting AC Environment...* message and
-polls the Win32 shared-memory namespace (`acevo_pmf_*` vs `acpmf_*`) plus the
-running-process list every 500 ms. The countdown starts as soon as one of the
-supported games is found. All four live sources attach via Win32
-`OpenFileMappingW`; explicit `--source` overrides skip detection and start
-their reader immediately.
+polls the running-process list every 500 ms for the game's **executable**,
+matched exactly:
+
+| Game | Executable |
+|---|---|
+| AC Evo | `AssettoCorsaEVO.exe` |
+| AC1 | `acs.exe`, `acs_x86.exe` |
+| ACC | `acc.exe`, `AC2-Win64-Shipping.exe` |
+| AC Rally | `acr.exe` |
+
+The EXE is the whole detection signal — only one AC title runs at a time, so it
+is unambiguous, and a shared-memory block left behind by a crashed game or held
+open by Content Manager or SimHub is never mistaken for a running game. The
+countdown starts as soon as one of the supported games is found, which may be
+while it is still loading; the readers retry until its telemetry appears. All
+four live sources attach via Win32 `OpenFileMappingW`; explicit `--source`
+overrides skip detection and start their reader immediately.
 
 **Important:** AC1, ACC, and AC Rally publish under the *same* shared-memory
 tag names (`Local\acpmf_*`) — only one of those games can run at a time
@@ -183,7 +195,9 @@ widget element isn't drawn · *—* = unsupported on that game.
 `Local\acpmf_*` — only one of those games can run at a time anyway, and
 the `--source` flag tells the overlay which struct layout to apply.
 Attaching with the wrong layout reads garbage. AC Evo uses its own
-`Local\acevo_pmf_*` namespace.
+`Local\acevo_pmf_*` namespace. Since the tag can't tell the three apart,
+`auto` detection identifies the game by its **executable** instead — see
+[`sources/detect.py`](src/live_telemetry_evo/sources/detect.py).
 
 **AC Rally** publishes all temperatures (tire core, brake, water,
 exhaust) in **Kelvin** — the source applies −273.15 across the board.

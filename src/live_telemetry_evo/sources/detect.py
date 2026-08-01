@@ -1,46 +1,32 @@
 """Auto-detect which Assetto Corsa game is running.
 
-Combines three cheap signals so we can map ``--source auto`` to the right
-reader without asking the user which game they launched:
+Maps ``--source auto`` to the right reader without asking the user which
+game they launched. **The running EXE is the whole signal**: we read the
+process list via the Win32 toolhelp snapshot and match it against the
+known binary names in :data:`_GAMES`. Only one AC title is ever running
+on a machine at a time, so the first match wins.
 
-1. Shared-memory tag presence. AC Evo publishes under its own
-   ``Local\\acevo_pmf_*`` namespace; AC1, ACC and AC Rally all share
-   ``Local\\acpmf_*``. So the namespace alone tells us "AC Evo or not".
-2. Running process names. For the ``acpmf_*`` family we read the process
-   list via the Win32 toolhelp snapshot to pick AC1 / ACC / AC Rally.
-3. Physics-block content. When process hints can't tell ACC apart from
-   AC Rally (their EXE names sometimes overlap on Unreal Engine builds),
-   we peek at ``tyreCoreTemp[0]`` — AC Rally publishes that field in
-   Kelvin (≈ 290–360), ACC in Celsius (≤ ≈ 110). Anything above 150
-   means Kelvin and pins the detector to AC Rally.
+The detector does not look at shared memory. The ``Local\\acpmf_*``
+namespace is shared by AC1, ACC and AC Rally so it can't identify a game
+on its own, and a mapping left by a crashed game — or held open by a
+tool like Content Manager or SimHub — is indistinguishable from a live
+one.
 
-The detector is read-only — it opens the named mapping only long enough
-to read the first few hundred bytes, then closes the handle. Running the
-detector while a reader is also active is safe.
+A game therefore counts as running from the moment its process appears,
+possibly before it has published any telemetry. That is safe: the readers
+open their mapping lazily and retry, treating a not-yet-present mapping
+as "not connected yet" rather than an error (see
+``AcRallyTelemetrySource._try_connect`` and its siblings), so the overlay
+simply shows no data until the game starts publishing.
 """
 from __future__ import annotations
 
 import ctypes
-import struct
 import sys
 from ctypes import wintypes
 
 
-_FILE_MAP_READ = 0x0004
 _TH32CS_SNAPPROCESS = 0x00000002
-# Offset of ``tyreCoreTemp[0]`` inside the AC1-family physics struct.
-# Layout: packetId..speedKmh (32 B) + velocity (12) + accG (12) +
-# wheelSlip / wheelLoad / wheelPressure / wheelAngularSpeed / tyreWear /
-# tyreDirtyLevel (6 × 16 B) = 152 B before the tyreCoreTemp array.
-_TYRE_CORE_TEMP_OFFSET = 152
-# Any tyreCoreTemp above this is implausibly hot in °C and almost
-# certainly Kelvin, so we attribute it to AC Rally rather than ACC.
-_KELVIN_DECISION_THRESHOLD = 150.0
-# A positive value below the Kelvin threshold is plausibly Celsius — ACC
-# writes ambient ~10 °C at session start and ≤ ~110 °C hot. The lower
-# bound rules out a fully zero-filled (paused / menu) physics block so
-# we can keep polling instead of locking in a wrong guess.
-_CELSIUS_DECISION_FLOOR = 5.0
 # Win32 returns INVALID_HANDLE_VALUE (a sign-extended -1) as the raw
 # integer wrapped in a c_void_p; cast through int so pylint sees a plain
 # constant instead of inferring it as a class definition via the .value
@@ -50,19 +36,6 @@ _INVALID_HANDLE = int(ctypes.c_void_p(-1).value or 0)
 
 if sys.platform == "win32":
     _KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-    _OpenFileMappingW = _KERNEL32.OpenFileMappingW
-    _OpenFileMappingW.argtypes = [ctypes.c_uint32, ctypes.c_int32, ctypes.c_wchar_p]
-    _OpenFileMappingW.restype = ctypes.c_void_p
-
-    _MapViewOfFile = _KERNEL32.MapViewOfFile
-    _MapViewOfFile.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
-                                ctypes.c_uint32, ctypes.c_uint32, ctypes.c_size_t]
-    _MapViewOfFile.restype = ctypes.c_void_p
-
-    _UnmapViewOfFile = _KERNEL32.UnmapViewOfFile
-    _UnmapViewOfFile.argtypes = [ctypes.c_void_p]
-    _UnmapViewOfFile.restype = ctypes.c_int32
 
     _CloseHandle = _KERNEL32.CloseHandle
     _CloseHandle.argtypes = [ctypes.c_void_p]
@@ -88,74 +61,6 @@ class _PROCESSENTRY32W(ctypes.Structure):
         ("dwFlags", wintypes.DWORD),
         ("szExeFile", ctypes.c_wchar * 260),
     ]
-
-
-def _tag_exists(name: str) -> bool:
-    """Return True iff a Windows named file-mapping exists under ``name``.
-
-    Opens the mapping for the briefest possible moment and immediately
-    closes it; no view is mapped, so this is essentially free.
-    """
-    if _KERNEL32 is None:
-        return False
-    handle = _OpenFileMappingW(_FILE_MAP_READ, False, name)
-    if not handle:
-        return False
-    _CloseHandle(handle)
-    return True
-
-
-def _acpmf_physics_tyre_core_temp() -> float | None:
-    """Read ``tyreCoreTemp[0]`` from ``Local\\acpmf_physics``.
-
-    Returns the raw float as written by the game, or ``None`` when the
-    mapping can't be opened or the value can't be unpacked. The caller
-    decides what range constitutes Kelvin vs Celsius vs "no signal yet".
-    """
-    if _KERNEL32 is None:
-        return None
-    handle = _OpenFileMappingW(_FILE_MAP_READ, False, "Local\\acpmf_physics")
-    if not handle:
-        return None
-    try:
-        view = _MapViewOfFile(handle, _FILE_MAP_READ, 0, 0,
-                              _TYRE_CORE_TEMP_OFFSET + 4)
-        if not view:
-            return None
-        try:
-            blob = ctypes.string_at(view, _TYRE_CORE_TEMP_OFFSET + 4)
-        finally:
-            _UnmapViewOfFile(view)
-    finally:
-        _CloseHandle(handle)
-    try:
-        return float(struct.unpack_from("<f", blob, _TYRE_CORE_TEMP_OFFSET)[0])
-    except struct.error:
-        return None
-
-
-def acpmf_tag_present() -> bool:
-    """Public helper: is the shared ``Local\\acpmf_*`` namespace up at all?
-
-    Lets ``DetectionView`` distinguish "still ambiguous, keep polling"
-    from "nothing running at all" so it can apply the ACC fallback only
-    when a game in the acpmf family is genuinely present.
-    """
-    return _tag_exists("Local\\acpmf_static")
-
-
-def acc_process_present() -> bool:
-    """Public helper: is an ACC process actually running (including the
-    Unreal-Engine shipping binary it may share with AC Rally)?
-
-    The ACC fallback in :class:`DetectionView` fires when the ``acpmf_*``
-    tag is up but the physics block is zero-filled (menu / paused), which
-    can't tell ACC from AC Rally. Gating that fallback on a live ACC
-    process stops a *stale* ``acpmf_*`` mapping — left behind by a crashed
-    game or held open by another tool (SimHub, Content Manager, …) — from
-    being mistaken for a running ACC when nothing is actually up.
-    """
-    return is_process_running(_ACC_PROCESS_NAMES)
 
 
 def is_process_running(names: tuple[str, ...]) -> bool:
@@ -204,59 +109,57 @@ def _running_processes() -> list[str]:
         _CloseHandle(snap)
 
 
-# Known EXE names per game. Lower-cased for case-insensitive comparison.
-# Listed in priority order — the first match wins inside the acpmf_* family
-# so that AC Rally (which may share an Unreal-Engine shipping binary with
-# ACC) is picked when the unambiguous Rally process is also present.
-_AC_RALLY_PROCESS_HINTS = ("acrally", "ac rally", "assetto corsa rally")
-_AC1_PROCESS_NAMES = ("acs.exe",)
-_ACC_PROCESS_NAMES = ("ac2-win64-shipping.exe", "acc.exe")
+# The detection table: ``--source`` name and the EXE basenames that
+# identify it. Matching is case-insensitive but **exact** — the process
+# basename must equal one of these, not merely contain it. The EXE is the
+# only detection signal, so a loose substring match would commit to the
+# wrong game outright (``acs.exe`` occurs inside a file named
+# ``maracs.exe.old``, and so on) with nothing left to catch the error.
+#
+# Verified against the shipped Steam installs:
+#
+#   AC Evo   …\Assetto Corsa EVO\AssettoCorsaEVO.exe
+#   AC1      …\assettocorsa\acs.exe          (acs_x86.exe on the 32-bit build)
+#   ACC      …\Assetto Corsa Competizione\acc.exe  (launcher) and
+#            …\AC2\Binaries\Win64\AC2-Win64-Shipping.exe (the game itself)
+#   Rally    …\Assetto Corsa Rally\acr\Binaries\Win64\acr.exe
+#
+# AC Evo ships a single binary in the install root — it runs on Kunos'
+# own engine (RenoirCore), not Unreal, so there is no separate
+# ``*-Win64-Shipping.exe`` to match the way ACC has one.
+#
+# Note "acr.exe" and "acs.exe" carry no trace of the words "rally" or
+# "corsa": a descriptive guess like "acrally" matches nothing on a real
+# install. Only add a name here after checking it against an actual one —
+# a wrong name fails silently, with no second signal to fall back on.
+# "acrally.exe" is the single exception, a plausible non-Steam/repack name
+# listed exactly so it costs nothing if it never appears.
+#
+# Order matters only as tie-break insurance; a machine never runs two AC
+# titles at once.
+_GAMES: tuple[tuple[str, frozenset[str]], ...] = (
+    ("ac-evo", frozenset({"assettocorsaevo.exe"})),
+    ("acrally", frozenset({"acr.exe", "acrally.exe"})),
+    ("ac1", frozenset({"acs.exe", "acs_x86.exe"})),
+    ("acc", frozenset({"ac2-win64-shipping.exe", "acc.exe"})),
+)
 
 
-def detect_running_game() -> str | None:  # pylint: disable=too-many-return-statements
-    """Return the matching ``--source`` name, or ``None`` when no game is up
-    *or* the running game in the ``acpmf_*`` family can't be confidently
-    identified yet.
+def detect_running_game() -> str | None:
+    """Return the matching ``--source`` name, or ``None`` when no
+    supported game is running.
 
-    Returns one of ``"ac-evo"`` / ``"ac1"`` / ``"acc"`` / ``"acrally"``.
-    Callers that want a fallback for the ambiguous case (acpmf tags
-    present but no process / content signal) should pair this with
-    :func:`acpmf_tag_present` and a small timeout — see ``DetectionView``.
+    Returns one of ``"ac-evo"`` / ``"ac1"`` / ``"acc"`` / ``"acrally"``,
+    decided purely by which EXE is in the process list. A game counts as
+    running from the moment its process appears — it may not have
+    published shared memory yet, which the readers handle by retrying
+    their connection. ``None`` means "keep polling", not "give up".
     """
-    if _tag_exists("Local\\acevo_pmf_static"):
-        return "ac-evo"
-    if not _tag_exists("Local\\acpmf_static"):
-        return None
-
-    procs = _running_processes()
-    if any(any(hint in p for hint in _AC_RALLY_PROCESS_HINTS) for p in procs):
-        return "acrally"
-    if any(p in procs for p in _AC1_PROCESS_NAMES):
-        return "ac1"
-    # From here only the shared ACC / AC-Rally shipping binary is left to
-    # identify by physics content. Require that binary to actually be
-    # running first: the acpmf_* mapping — and the last physics frame the
-    # game wrote into it — can linger after the game exits or be held open
-    # by another tool (Content Manager, SimHub). Without this gate a stale
-    # tyreCoreTemp still sitting in a plausible Celsius range reads as a
-    # live ACC when nothing is running. See acc_process_present().
-    if not any(any(n in p for n in _ACC_PROCESS_NAMES) for p in procs):
-        return None
-    # ACC and AC Rally sometimes ship under the same Unreal Engine
-    # shipping binary, so process hints can't always tell them apart.
-    # Peek at tyreCoreTemp[0]: Kelvin (≈ 290–360) → AC Rally, plausible
-    # Celsius (≈ 5–150) → ACC, anything near zero → game is paused or
-    # in a menu and the physics block hasn't been written yet. In the
-    # last case we deliberately return None so the caller keeps polling
-    # rather than mis-categorising a paused AC Rally session as ACC.
-    temp = _acpmf_physics_tyre_core_temp()
-    if temp is not None:
-        if temp > _KELVIN_DECISION_THRESHOLD:
-            return "acrally"
-        if temp >= _CELSIUS_DECISION_FLOOR:
-            return "acc"
+    procs = set(_running_processes())
+    for name, exes in _GAMES:
+        if procs & exes:
+            return name
     return None
 
 
-__all__ = ["detect_running_game", "acpmf_tag_present", "acc_process_present",
-           "is_process_running"]
+__all__ = ["detect_running_game", "is_process_running"]

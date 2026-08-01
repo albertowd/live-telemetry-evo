@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.3] - 2026-08-01
+
+### Fixed
+- AC Rally was not detected at all (regression in 0.7.0) — its `acr.exe` process was missing from the detector's list of known executables.
+
+### Changed
+- Game auto-detection now identifies the game **solely by its executable**, matched exactly against the running-process list: `AssettoCorsaEVO.exe`, `acs.exe`/`acs_x86.exe`, `acc.exe`/`AC2-Win64-Shipping.exe`, `acr.exe`. Also adds AC1's 32-bit `acs_x86.exe`, which was never matched.
+- Detection no longer inspects shared memory, and no longer guesses between ACC and AC Rally from tyre-temperature units. A stale `acpmf_*` mapping — left by a crashed game or held open by Content Manager / SimHub — is never mistaken for a running game.
+- A game sitting on its main menu is detected immediately, with no 10-second wait before the overlay commits to ACC.
+- The overlay now appears as soon as the game process starts rather than waiting for its first telemetry block; widgets show no data until the game publishes, and the readers connect on their own once it does.
+
+## [0.7.2] - 2026-07-24
+
+### Fixed
+- Bundled `.exe` crashed at launch with `No module named 'PySide6.QtOpenGL'` — the build stripped `QtOpenGL`/`Qt6OpenGL.dll`, which the VR overlay imports at startup. Both are now kept in the bundle.
+
 ## [0.7.1] - 2026-07-23
 
 ### Added
@@ -140,6 +156,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
+[0.7.3]: https://github.com/albertowd/live-telemetry-evo/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/albertowd/live-telemetry-evo/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.6...v0.7.1
 [0.7.0]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.5...v0.6.6
