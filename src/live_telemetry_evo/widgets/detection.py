@@ -9,34 +9,29 @@ from PySide6.QtWidgets import QWidget
 from ..colors import Colors
 from ..fonts import label_font
 from ..resources import app_icon_path
-from ..sources.detect import (acc_process_present, acpmf_tag_present,
-                              detect_running_game)
+from ..sources.detect import detect_running_game
 
 
 class DetectionView(QWidget):
     """Full-screen 'Detecting AC Environment...' poller shown before the
     countdown when ``--source auto`` is in effect.
 
-    Polls every :attr:`POLL_MS` ms. On first confident detection it
-    waits until at least :attr:`MIN_VISIBLE_MS` has elapsed since
-    :meth:`start`, then emits :attr:`detected` with the source name
-    and hides itself — so the logo + status text stay readable even
-    when a game is already running and detection succeeds on the first
-    tick.
+    Polls every :attr:`POLL_MS` ms. On first detection it waits until at
+    least :attr:`MIN_VISIBLE_MS` has elapsed since :meth:`start`, then
+    emits :attr:`detected` with the source name and hides itself — so the
+    logo + status text stay readable even when a game is already running
+    and detection succeeds on the first tick.
 
-    Detection in the ``acpmf_*`` family (AC1 / ACC / AC Rally) can be
-    ambiguous when the game is paused or sitting on its main menu (the
-    physics block is zero-filled, so the Kelvin-vs-Celsius fingerprint
-    won't fire). In that case we keep polling for :attr:`ACPMF_TIMEOUT_MS`
-    before committing to the ACC default, giving the user time to
-    unpause / enter a stage so AC Rally's Kelvin temps reveal themselves.
+    The detector identifies the game by its running EXE, so there is no
+    ambiguous state to time out of and no default to fall back to: we
+    poll until a supported game's process appears, however long that
+    takes.
     """
 
     detected = Signal(str)
 
     POLL_MS = 500
     MIN_VISIBLE_MS = 1000
-    ACPMF_TIMEOUT_MS = 10000
     MESSAGE = "Detecting AC Environment..."
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -53,12 +48,10 @@ class DetectionView(QWidget):
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
         self._timer.timeout.connect(self._tick)
         self._started_at = 0.0
-        self._acpmf_first_seen: float | None = None
         self._detected_name: str | None = None
 
     def start(self) -> None:
         self._detected_name = None
-        self._acpmf_first_seen = None
         self._started_at = time.monotonic()
         self.show()
         self.update()
@@ -71,32 +64,7 @@ class DetectionView(QWidget):
         if self._detected_name is None:
             name = detect_running_game()
             if name is None:
-                # Detector couldn't pick confidently. If the acpmf_* tags
-                # are up (paused / menu state of ACC or AC Rally) and the
-                # ambiguity has lasted past ACPMF_TIMEOUT_MS, commit to
-                # ACC so genuine ACC users at the main menu don't wait
-                # forever. Until then, keep polling — the user might
-                # just need to unpause for the Kelvin fingerprint to
-                # appear and resolve to AC Rally.
-                #
-                # Require a live ACC process too, not just the tag: the
-                # acpmf_* mapping can linger after a game crashes or be
-                # held open by another tool, and committing to ACC on a
-                # stale tag detects a game that isn't running. A real ACC
-                # at its main menu still has its process up, so this only
-                # rejects the phantom case.
-                if acpmf_tag_present() and acc_process_present():
-                    now = time.monotonic()
-                    if self._acpmf_first_seen is None:
-                        self._acpmf_first_seen = now
-                    elif (now - self._acpmf_first_seen) * 1000.0 >= self.ACPMF_TIMEOUT_MS:
-                        name = "acc"
-                    else:
-                        return
-                else:
-                    self._acpmf_first_seen = None
-                    return
-            if name is None:
+                # No game running, or one still loading — keep polling.
                 return
             self._detected_name = name
             self._timer.stop()
