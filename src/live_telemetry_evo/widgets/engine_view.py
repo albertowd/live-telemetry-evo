@@ -72,11 +72,32 @@ class EngineView(DraggableWidget):
         # ICE cars hit none of these and the bar stays hidden.
         self._kers_visible = False
         self._kers_spawn_charge: float | None = None
+        # Car identity the state above was learned under. The source
+        # bumps ``EngineData.car_epoch`` when the player changes car;
+        # everything self-calibrated for the old car has to go with it.
+        self._car_epoch = 0
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def set_data(self, data: EngineData) -> None:
+        if data.car_epoch != self._car_epoch:
+            self._car_epoch = data.car_epoch
+            self._reset_learned_state()
         self._data = data
         self.update()
+
+    def _reset_learned_state(self) -> None:
+        """Forget what was calibrated against the previous car: the
+        observed power peak (otherwise a 150 hp car keeps the 800 hp
+        scale of the one before it) and the battery-bar auto-detect.
+
+        The colour Power curve isn't handled here — the source
+        republishes ``torque_curve_nm`` per car and the value check in
+        :meth:`paintEvent` rebuilds from that (or from the default when
+        the new car has no curve)."""
+        self._observed_peak_hp = 0.0
+        self._observed_peak_rpm = 0.0
+        self._kers_visible = False
+        self._kers_spawn_charge = None
 
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
@@ -101,15 +122,19 @@ class EngineView(DraggableWidget):
             ratio = min(1.0, d.rpm / d.max_rpm) if d.max_rpm > 0.0 else 0.0
         # Rebuild the colour Power curve when the source publishes a new
         # per-car torque curve (AC1 loads engine.ini's POWER_CURVE .lut
-        # via the ACD). List identity change = new car loaded; ``is not``
-        # is the right comparison since sources assign a fresh list.
-        if (d.torque_curve_nm
-                and d.torque_curve_nm is not self._loaded_torque_curve):
-            self._power = Power.from_torque_curve(d.torque_curve_nm)
-            self._loaded_torque_curve = d.torque_curve_nm
-            # Discard the observed-peak fallback state when we have a
-            # real curve — its peak RPM was learned against the wrong
-            # default and would now mis-steer the colour bands.
+        # via the ACD). Compared by value, not identity: the FrameBus
+        # deep-copies every frame, so the list arrives as a fresh object
+        # each tick and an ``is not`` check would rebuild the curve on
+        # every single paint.
+        if d.torque_curve_nm != self._loaded_torque_curve:
+            # An empty list means "no per-car curve" (no ACD, or a car
+            # whose data we couldn't read) — fall back to the default
+            # rather than keep the previous car's curve.
+            self._power = Power.from_torque_curve(
+                d.torque_curve_nm or DEFAULT_TORQUE_CURVE)
+            self._loaded_torque_curve = list(d.torque_curve_nm)
+            # Discard the observed-peak fallback state either way: it was
+            # learned against a curve that no longer applies.
             self._observed_peak_hp = 0.0
             self._observed_peak_rpm = 0.0
 
@@ -377,7 +402,12 @@ class EngineView(DraggableWidget):
         if d.fuel_liters > 0.0:
             cells.append(("fuel", "FUEL", f"{d.fuel_liters:.0f}L"))
         if d.brake_bias > 0.0:
-            cells.append(("car-brake-parking", "BBIAS", f"{int(d.brake_bias * 100)}%F"))
+            # Round, don't truncate. The games publish the bias as a
+            # single-precision fraction, so a 69 % setting arrives as
+            # 0.68999999 and int() floored it to 68 — a full point low on
+            # almost every setting the driver dials in.
+            cells.append(("car-brake-parking", "BBIAS",
+                          f"{round(d.brake_bias * 100)}%F"))
         if not cells:
             return
 

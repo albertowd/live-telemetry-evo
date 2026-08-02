@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- ACC brake bias now matches the in-car dash: the per-car offset from the official documentation is applied to the raw shared-memory value.
+- Changing car without restarting the game kept the previous car's power scale, ideal pressures and calibrated maxima — all of it re-seeds on a car change now.
+- Brake bias read one point low (a 69 % setting showed 68 %) — the readout truncated the game's value instead of rounding it.
+- Fitting a compound the car files don't describe kept the previous compound's temperature window instead of the default curve.
+- AC Rally's spec sheet is picked up when the game fills it in, instead of only at connect time.
+
+### Changed
+- Per-car power and tyre-temperature colour curves rebuild only when the curve changes, not on every repaint.
+- Docs: the suspension bar is scaled to the car's mechanical travel or the session's deepest compression — never to the setup's packer range.
+- Docs: the suspension reference self-calibrates on ACC and AC EVO, and one hard kerb strike can set it for the rest of the session.
+
 ## [0.7.3] - 2026-08-01
 
 ### Fixed
