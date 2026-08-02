@@ -15,6 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Per-car power and tyre-temperature colour curves rebuild only when the curve changes, not on every repaint.
+- Docs: the suspension bar is scaled to the car's mechanical travel or the session's deepest compression — never to the setup's packer range.
+- Docs: the suspension reference self-calibrates on ACC and AC EVO, and one hard kerb strike can set it for the rest of the session.
 
 ## [0.7.3] - 2026-08-01
 
