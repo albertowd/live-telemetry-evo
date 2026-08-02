@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.4] - 2026-08-02
 
 ### Fixed
 - ACC brake bias now matches the in-car dash: the per-car offset from the official documentation is applied to the raw shared-memory value.
@@ -172,6 +172,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Tray context menu no longer flickers under the overlay; topmost-reassertion skips while a popup is active.
 - `build.py` now bundles `resources/icon.png` so the tray icon resolves in the frozen build.
 
+[0.7.4]: https://github.com/albertowd/live-telemetry-evo/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/albertowd/live-telemetry-evo/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/albertowd/live-telemetry-evo/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/albertowd/live-telemetry-evo/compare/v0.6.6...v0.7.1
