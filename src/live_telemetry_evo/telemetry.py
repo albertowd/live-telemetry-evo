@@ -17,14 +17,25 @@ class WheelData:
     height: float = 0.0       # mm, ride height
     lock: bool = False
     susp_t: float = 0.0       # current suspension travel (m)
-    susp_m_t: float = 0.0     # max observed travel (m); 0 = uncalibrated
+    # Reference travel the widget draws ``susp_t`` against (m); 0 =
+    # uncalibrated. Either the car data's total mechanical travel or, when
+    # the game doesn't publish one, a one-way high-water mark of observed
+    # compression — see ``susp_v``. Never the setup's bump-stop/packer
+    # range: no game publishes that.
+    susp_m_t: float = 0.0
     # True when ``susp_m_t`` came from a rolling-max calibration rather
-    # than a static-supplied limit (typically: mod cars or AC EVO, whose
-    # static block dropped the field). The suspension widget colours
-    # this case blue in the middle band so the user can see the bar is
-    # tracking observed peaks rather than the engineered limit — and so
-    # the brief "ratio==1.0" at calibration startup doesn't read as a
-    # false bottoming-out red.
+    # than a static-supplied limit (typically: mod cars, ACC — whose docs
+    # mark the field "Not shown in ACC" — or AC EVO, whose static block
+    # dropped it). The suspension widget colours this case blue in the
+    # middle band so the user can see the bar is tracking observed peaks
+    # rather than the engineered limit — and so the brief "ratio==1.0" at
+    # calibration startup doesn't read as a false bottoming-out red.
+    #
+    # Known limitation: the rolling max only ever grows, so one impact
+    # (kerb strike, landing, off-track drop) can set the reference for
+    # the whole session and leave the yellow/red bands unreachable
+    # afterwards. Verified on a logged stint: an off-track kerb hit
+    # raised one corner's reference 21 % in two ticks.
     susp_v: bool = False
     tire_d: float = 0.0       # dirt level 0..4
     tire_l: float = 0.0       # vertical load, Newtons
@@ -84,13 +95,19 @@ class WheelData:
     # for this wheel, when the source can supply one (AC1 reads
     # PERFORMANCE_CURVE from tyres.ini's THERMAL_<section>). Empty =
     # no per-car curve; the wheel widget falls back to the default
-    # tire-temp curve. Widget rebuilds its colour curve by list
-    # identity (`is not`) so per-frame writes are cheap.
+    # tire-temp curve. The widget rebuilds its colour curve only when
+    # the points differ from the ones it last built from, so re-publishing
+    # the same curve every frame is cheap.
     temp_curve_pts: list[tuple[float, float]] = field(default_factory=list)
     # Per-compound ideal cold pressure (psi) from PRESSURE_IDEAL —
     # sources already fold this into tire_p_norm, so this is the raw
     # value for display / future use. 0 = unknown.
     ideal_pressure_psi: float = 0.0
+    # Bumped by the source every time the player's car changes (see
+    # TelemetryFrame.reset_for_car). Widgets that learn per-car state
+    # across frames — the brake pad/disc self-calibration here — compare
+    # it against the epoch they learned under and start over on a change.
+    car_epoch: int = 0
 
 
 @dataclass
@@ -110,9 +127,9 @@ class EngineData:
     # Per-car torque-vs-RPM curve from the source when available (AC1
     # parses engine.ini's POWER_CURVE .lut). Empty = no per-car curve;
     # the engine widget falls back to a default or to a self-calibrated
-    # band from observed BHP. The widget rebuilds its colour curve when
-    # this list reference changes (sources assign a fresh list per car
-    # load), so per-frame writes are cheap.
+    # band from observed BHP. The widget rebuilds its colour curve only
+    # when the points differ from the ones it last built from, so
+    # re-publishing the same curve every frame is cheap.
     torque_curve_nm: list[tuple[float, float]] = field(default_factory=list)
     # AC1/Evo gear convention: 0=R, 1=N, 2+ = forward gears (display as N-1).
     gear: int = 1
@@ -181,6 +198,10 @@ class EngineData:
     ers_heat_charging: bool = False
     ers_deployment_map: int = -1
     ers_recharge_map: float = -1.0
+    # Bumped by the source on every car change — see WheelData.car_epoch.
+    # The engine widget resets its observed peak-HP calibration and the
+    # battery-bar auto-detect latch when this moves.
+    car_epoch: int = 0
 
 
 @dataclass
@@ -217,3 +238,43 @@ class TelemetryFrame:
     engine: EngineData = field(default_factory=EngineData)
     inputs: InputsData = field(default_factory=InputsData)
     wheels: dict[str, WheelData] = field(default_factory=lambda: {w: WheelData() for w in WHEEL_IDS})
+    # Identity of the car the player is currently in ("" until a source
+    # reads one) and a counter that increments on every change of it.
+    car_id: str = ""
+    car_epoch: int = 0
+
+    def reset_for_car(self, car_id: str) -> None:
+        """Drop everything learned for the previous car.
+
+        The games keep their shared-memory blocks mapped across a car
+        change, so a source that seeds per-car values once (spec-sheet
+        peaks, ACD curves, ideal pressures) and rolling maxima that only
+        ever grow (peak boost, suspension travel) would otherwise show
+        the *previous* car's scale for the rest of the game session.
+
+        Rebuilding the three slices from their defaults is the whole
+        reset: every live field is rewritten from shared memory on the
+        next tick, and the per-car ones go back to "unknown" so the
+        source and the widgets re-derive them for the new car.
+
+        A car change is **not** the only thing that invalidates derived
+        state, and this is not the hook for the others:
+
+        * **Per compound**, changing at any pit stop — ideal pressure
+          and the thermal-performance curve. The AC1 source reloads both
+          whenever ``graphics.tyreCompound`` changes (see
+          ``_refresh_compound_curves``); the other games publish an
+          already-normalised pressure/temperature per frame.
+        * **Per tyre / brake set** — the wear bars. They normalise
+          against the highest value seen, so fitting fresh pads or tyres
+          raises that ceiling on the next frame and the bar refills on
+          its own.
+        * **Per session** (practice → race, same car) — nothing. The
+          learned maxima describe the car, not the session, so they are
+          deliberately kept.
+        """
+        self.car_id = car_id
+        self.car_epoch += 1
+        self.engine = EngineData(car_epoch=self.car_epoch)
+        self.inputs = InputsData()
+        self.wheels = {w: WheelData(car_epoch=self.car_epoch) for w in WHEEL_IDS}

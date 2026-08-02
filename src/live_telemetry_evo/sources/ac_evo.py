@@ -742,6 +742,9 @@ class AcEvoTelemetrySource(TelemetrySource):
             return True
         try:
             self._reader.open()
+            # Fresh connection = fresh game process; make the first tick
+            # re-seed every per-car value from scratch.
+            self._car_key = ""
             self._apply_static(self._reader.read_static())
             log("[ac-evo] connected to shared memory")
             return True
@@ -772,6 +775,9 @@ class AcEvoTelemetrySource(TelemetrySource):
             self._reader.close()
             return
 
+        # Car-change check before anything is applied, so the new car's
+        # first published frame is already built on a clean slate.
+        self._sync_car(graphics)
         # Graphics first so physics can read the per-wheel lock flag it
         # sets (abs_active gates on `not w.lock`). Hybrid deploy power
         # depends on both blocks (charge from graphics, throughput
@@ -782,6 +788,27 @@ class AcEvoTelemetrySource(TelemetrySource):
         if self._bus is not None:
             self._bus.publish(self._frame)
         self.frame.emit(self._frame)
+
+    def _sync_car(self, gr: _SPageFileGraphic) -> None:
+        """Reset every per-car value when the player changes car.
+
+        AC Evo publishes the car identity on the graphics block (its
+        static block dropped the car spec sheet entirely) and keeps the
+        mapping alive across a change, so without this the rolling maxima
+        the overlay calibrates — peak boost, suspension travel, and the
+        engine widget's observed peak BHP — would stay scaled to whatever
+        car the session started with.
+        """
+        raw = bytes(gr.car_model).rstrip(b"\x00")
+        car = raw.decode("utf-8", errors="ignore").strip()
+        if not self._car_changed(car, self._frame):
+            return
+        log(f"[ac-evo] car changed to {self._car_key}")
+        # Frame-side state is back to defaults; drop the derivation state
+        # this source keeps outside the frame too.
+        self._tire_wear_live = False
+        self._prev_kers_current_kj = None
+        self._last_kers_tick = None
 
     def _apply_static(self, st: _SPageFileStatic) -> None:
         # AC Evo's static block is session/track metadata only — the AC1

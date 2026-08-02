@@ -249,6 +249,11 @@ _ABS_SLIP_THRESHOLD = 0.10
 # stretch that window across the full wear bar. Empirical value from
 # the LiveTelemetry plugin.
 _AC1_TIRE_WEAR_WINDOW = 0.06
+# How many polling ticks between static-block re-reads. The static block
+# only changes when the player changes car, so half a second of latency
+# at the default 60 Hz is plenty — and it keeps a 820-byte copy off the
+# hot path at high polling rates.
+_STATIC_POLL_TICKS = 30
 
 
 class AcSharedMemoryReader:
@@ -330,6 +335,8 @@ class AcTelemetrySource(TelemetrySource):
         self._prev_kers_charge: Optional[float] = None
         self._prev_kers_current_kj: Optional[float] = None
         self._last_kers_tick: Optional[float] = None
+        # Ticks left before the next static re-read (car-change check).
+        self._static_poll = 0
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -352,7 +359,10 @@ class AcTelemetrySource(TelemetrySource):
             return True
         try:
             self._reader.open()
-            self._apply_static(self._reader.read_static())
+            # Re-seed from scratch: a fresh connection means a fresh game
+            # process, so nothing learned before it can be trusted.
+            self._car_key = ""
+            self._sync_static(self._reader.read_static())
             log("[ac1] connected to shared memory")
             return True
         except (OSError, RuntimeError) as exc:
@@ -378,11 +388,52 @@ class AcTelemetrySource(TelemetrySource):
             self._reader.close()
             return
 
+        self._poll_static()
         self._apply_graphics(graphics)
         self._apply_physics(phys)
         if self._bus is not None:
             self._bus.publish(self._frame)
         self.frame.emit(self._frame)
+
+    def _poll_static(self) -> None:
+        """Re-read the static block every :data:`_STATIC_POLL_TICKS` ticks
+        so a car swap inside a running game is picked up.
+
+        AC keeps the mapping alive across a car change and simply
+        rewrites the static block, so reading it once at connect time
+        left the previous car's spec sheet, torque curve and ideal
+        pressures in place until the overlay was restarted.
+        """
+        self._static_poll -= 1
+        if self._static_poll > 0:
+            return
+        self._static_poll = _STATIC_POLL_TICKS
+        try:
+            st = self._reader.read_static()
+        except (OSError, RuntimeError, ValueError):
+            # Transient read failure — the next physics read will drop
+            # the connection if it's real. Nothing to reset meanwhile.
+            return
+        self._sync_static(st)
+
+    def _sync_static(self, st: _SPageFileStatic) -> None:
+        """Apply the static block when it belongs to a car we haven't
+        seeded yet, clearing the previous car's derived data first."""
+        if not self._car_changed(getattr(st, "carModel", ""), self._frame):
+            return
+        log(f"[ac1] car changed to {self._car_key}")
+        # Frame-side state is already back to defaults; these are the
+        # source-side caches that feed it.
+        self._acd = None
+        self._torque_lut = None
+        self._tire_curves = {}
+        self._ideal_pressure_psi = {}
+        self._loaded_compound = ""
+        self._static_susp_max.clear()
+        self._prev_kers_charge = None
+        self._prev_kers_current_kj = None
+        self._last_kers_tick = None
+        self._apply_static(st)
 
     def _apply_static(self, st: _SPageFileStatic) -> None:
         """Seed the per-car spec values that AC1 publishes once at session
@@ -474,8 +525,9 @@ class AcTelemetrySource(TelemetrySource):
         self._torque_lut = Curve(torque_pts)
         # Hand the raw torque curve to the engine widget so it can build
         # the colour band against the real per-car peak HP RPM instead
-        # of the default 5500 RPM curve baked into engine_view. List
-        # identity change is the widget's "new car" signal.
+        # of the default 5500 RPM curve baked into engine_view. The
+        # widget rebuilds when the published points differ from the ones
+        # it last built from.
         self._frame.engine.torque_curve_nm = list(torque_pts)
 
     def _refresh_compound_curves(self, compound: str) -> None:
@@ -489,8 +541,8 @@ class AcTelemetrySource(TelemetrySource):
         self._tire_curves = {}
         self._ideal_pressure_psi = {}
         # Reset per-wheel frame state so the widget rebuilds its curves
-        # when the compound changes mid-stint. Assigning fresh lists is
-        # the widget's "new compound loaded" signal.
+        # when the compound changes mid-stint — an empty list clears the
+        # widget's cached curve, the new points rebuild it.
         for wid in WHEEL_IDS:
             w = self._frame.wheels[wid]
             w.temp_curve_pts = []

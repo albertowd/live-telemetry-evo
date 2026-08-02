@@ -163,7 +163,13 @@ a running game and see flat zero.
   (~1e-41) and pegs the RPM bar at 100 % every tick.
 * `brakeBias` has a per-car dash offset (PDF Appendix 4) that the
   in-car HUD adds before display — the SHM value is the raw signal,
-  off by a few percent from what the dashboard shows.
+  reading up to 21 points high (Porsche 991 GT3 R). The source applies
+  the offset from
+  [`sources/acc_cars.py`](src/live_telemetry_evo/sources/acc_cars.py),
+  generated from the PDF appendices by
+  [`tools/gen_acc_car_table.py`](tools/gen_acc_car_table.py). The same
+  table carries Appendix 5 (steering lock) and Appendix 7 (max RPM).
+  Cars added after v1.8.12 of the docs fall back to the raw value.
 * Per-wheel `lock` not published — slip-magnitude heuristic.
 
 ---
