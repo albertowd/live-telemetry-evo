@@ -91,6 +91,11 @@ class WheelData:
     # sources already fold this into tire_p_norm, so this is the raw
     # value for display / future use. 0 = unknown.
     ideal_pressure_psi: float = 0.0
+    # Bumped by the source every time the player's car changes (see
+    # TelemetryFrame.reset_for_car). Widgets that learn per-car state
+    # across frames — the brake pad/disc self-calibration here — compare
+    # it against the epoch they learned under and start over on a change.
+    car_epoch: int = 0
 
 
 @dataclass
@@ -181,6 +186,10 @@ class EngineData:
     ers_heat_charging: bool = False
     ers_deployment_map: int = -1
     ers_recharge_map: float = -1.0
+    # Bumped by the source on every car change — see WheelData.car_epoch.
+    # The engine widget resets its observed peak-HP calibration and the
+    # battery-bar auto-detect latch when this moves.
+    car_epoch: int = 0
 
 
 @dataclass
@@ -217,3 +226,43 @@ class TelemetryFrame:
     engine: EngineData = field(default_factory=EngineData)
     inputs: InputsData = field(default_factory=InputsData)
     wheels: dict[str, WheelData] = field(default_factory=lambda: {w: WheelData() for w in WHEEL_IDS})
+    # Identity of the car the player is currently in ("" until a source
+    # reads one) and a counter that increments on every change of it.
+    car_id: str = ""
+    car_epoch: int = 0
+
+    def reset_for_car(self, car_id: str) -> None:
+        """Drop everything learned for the previous car.
+
+        The games keep their shared-memory blocks mapped across a car
+        change, so a source that seeds per-car values once (spec-sheet
+        peaks, ACD curves, ideal pressures) and rolling maxima that only
+        ever grow (peak boost, suspension travel) would otherwise show
+        the *previous* car's scale for the rest of the game session.
+
+        Rebuilding the three slices from their defaults is the whole
+        reset: every live field is rewritten from shared memory on the
+        next tick, and the per-car ones go back to "unknown" so the
+        source and the widgets re-derive them for the new car.
+
+        A car change is **not** the only thing that invalidates derived
+        state, and this is not the hook for the others:
+
+        * **Per compound**, changing at any pit stop — ideal pressure
+          and the thermal-performance curve. The AC1 source reloads both
+          whenever ``graphics.tyreCompound`` changes (see
+          ``_refresh_compound_curves``); the other games publish an
+          already-normalised pressure/temperature per frame.
+        * **Per tyre / brake set** — the wear bars. They normalise
+          against the highest value seen, so fitting fresh pads or tyres
+          raises that ceiling on the next frame and the bar refills on
+          its own.
+        * **Per session** (practice → race, same car) — nothing. The
+          learned maxima describe the car, not the session, so they are
+          deliberately kept.
+        """
+        self.car_id = car_id
+        self.car_epoch += 1
+        self.engine = EngineData(car_epoch=self.car_epoch)
+        self.inputs = InputsData()
+        self.wheels = {w: WheelData(car_epoch=self.car_epoch) for w in WHEEL_IDS}

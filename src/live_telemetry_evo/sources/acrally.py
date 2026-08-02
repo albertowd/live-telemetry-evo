@@ -59,6 +59,25 @@ _KELVIN_OFFSET_C = 273.15
 # certainly Kelvin. Used as a safety guard in case a future patch
 # changes units mid-stream.
 _KELVIN_HEURISTIC_C = 200.0
+# Ticks between static-block re-reads (car-change + lazy-write check).
+_STATIC_POLL_TICKS = 30
+
+
+def _static_car_key(st: _SPageFileStatic) -> str:
+    """Best available identity for the car the static block describes.
+
+    ``carModel`` is the natural key, but AC Rally writes the static block
+    lazily and has been seen leaving the name blank while the spec sheet
+    is populated. Falling back to the spec numbers still gives us a key
+    that changes when the car does, so the seed isn't skipped forever on
+    those builds. Empty string = nothing published yet.
+    """
+    name = (getattr(st, "carModel", "") or "").strip()
+    if name:
+        return name
+    if st.maxRpm > 0 or st.maxPower > 0 or st.maxTorque > 0:
+        return f"spec:{int(st.maxRpm)}:{int(st.maxPower)}:{int(st.maxTorque)}"
+    return ""
 
 
 def _k_to_c(k: float) -> float:
@@ -124,6 +143,11 @@ class AcRallyTelemetrySource(TelemetrySource):
         # rationale (trust the engineered limit when supplied; fall back
         # to rolling max + susp_v flag otherwise).
         self._static_susp_max: dict[str, float] = {}
+        # Ticks left before the next static re-read. Doubles as the fix
+        # for AC Rally's lazily-written static block: polling picks the
+        # spec sheet up as soon as the game fills it in, instead of
+        # keeping the zeros that were there at connect time.
+        self._static_poll = 0
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -146,7 +170,9 @@ class AcRallyTelemetrySource(TelemetrySource):
             return True
         try:
             self._reader.open()
-            self._apply_static(self._reader.read_static())
+            # Fresh connection = fresh game process; re-seed per-car state.
+            self._car_key = ""
+            self._sync_static(self._reader.read_static())
             log("[acrally] connected to shared memory")
             return True
         except (OSError, RuntimeError) as exc:
@@ -172,11 +198,35 @@ class AcRallyTelemetrySource(TelemetrySource):
             self._reader.close()
             return
 
+        self._poll_static()
         self._apply_graphics(graphics)
         self._apply_physics(phys)
         if self._bus is not None:
             self._bus.publish(self._frame)
         self.frame.emit(self._frame)
+
+    def _poll_static(self) -> None:
+        """Re-read the static block periodically so a car swap mid-session
+        is picked up (the game keeps the mapping alive across one), and so
+        the lazily-written spec sheet lands once the game writes it."""
+        self._static_poll -= 1
+        if self._static_poll > 0:
+            return
+        self._static_poll = _STATIC_POLL_TICKS
+        try:
+            st = self._reader.read_static()
+        except (OSError, RuntimeError, ValueError):
+            return
+        self._sync_static(st)
+
+    def _sync_static(self, st: _SPageFileStatic) -> None:
+        """Apply the static block when it describes a car we haven't
+        seeded yet, dropping the previous car's derived state first."""
+        if not self._car_changed(_static_car_key(st), self._frame):
+            return
+        log(f"[acrally] car changed to {self._car_key}")
+        self._static_susp_max.clear()
+        self._apply_static(st)
 
     def _apply_static(self, st: _SPageFileStatic) -> None:
         """AC Rally writes the static block lazily (zeros at session

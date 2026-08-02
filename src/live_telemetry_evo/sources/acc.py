@@ -339,6 +339,9 @@ class _SPageFileStatic(ctypes.Structure):
 _ACC_IDEAL_PSI = 26.0
 _LOCK_SLIP_THRESHOLD = 0.40
 _ABS_SLIP_THRESHOLD = 0.10
+# Ticks between static-block re-reads — the block only changes when the
+# player changes car, so half a second at 60 Hz is fast enough.
+_STATIC_POLL_TICKS = 30
 
 
 class AccSharedMemoryReader:
@@ -397,6 +400,8 @@ class AccTelemetrySource(TelemetrySource):
         # rationale (trust the engineered limit when supplied; fall back
         # to rolling max + susp_v flag otherwise).
         self._static_susp_max: dict[str, float] = {}
+        # Ticks left before the next static re-read (car-change check).
+        self._static_poll = 0
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -419,7 +424,10 @@ class AccTelemetrySource(TelemetrySource):
             return True
         try:
             self._reader.open()
-            self._apply_static(self._reader.read_static())
+            # A fresh connection is a fresh game process — re-seed the
+            # per-car state instead of trusting what the last one left.
+            self._car_key = ""
+            self._sync_static(self._reader.read_static())
             log("[acc] connected to shared memory")
             return True
         except (OSError, RuntimeError) as exc:
@@ -445,11 +453,38 @@ class AccTelemetrySource(TelemetrySource):
             self._reader.close()
             return
 
+        self._poll_static()
         self._apply_graphics(graphics)
         self._apply_physics(phys)
         if self._bus is not None:
             self._bus.publish(self._frame)
         self.frame.emit(self._frame)
+
+    def _poll_static(self) -> None:
+        """Re-read the static block periodically to catch a car swap.
+
+        ACC keeps the shared memory mapped when the player switches car,
+        so seeding the spec sheet once at connect time left the previous
+        car's peaks driving the bars for the rest of the session.
+        """
+        self._static_poll -= 1
+        if self._static_poll > 0:
+            return
+        self._static_poll = _STATIC_POLL_TICKS
+        try:
+            st = self._reader.read_static()
+        except (OSError, RuntimeError, ValueError):
+            return
+        self._sync_static(st)
+
+    def _sync_static(self, st: _SPageFileStatic) -> None:
+        """Apply the static block whenever it describes a car we haven't
+        seeded yet, dropping the previous car's derived state first."""
+        if not self._car_changed(getattr(st, "carModel", ""), self._frame):
+            return
+        log(f"[acc] car changed to {self._car_key}")
+        self._static_susp_max.clear()
+        self._apply_static(st)
 
     def _apply_static(self, st: _SPageFileStatic) -> None:
         """ACC's static block still carries the car spec, just like AC1."""

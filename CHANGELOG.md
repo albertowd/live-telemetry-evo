@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Changing car without restarting the game kept the previous car's power scale, ideal pressures and calibrated maxima — all of it re-seeds on a car change now.
+- AC Rally's spec sheet is picked up when the game fills it in, instead of only at connect time.
+
 ## [0.7.3] - 2026-08-01
 
 ### Fixed

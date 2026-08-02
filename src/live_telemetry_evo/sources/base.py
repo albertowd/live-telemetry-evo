@@ -35,6 +35,10 @@ class TelemetrySource(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._bus: FrameBus | None = None
+        # Identity of the car the frame's per-car state was built for.
+        # "" = nothing adopted yet (also the state after a disconnect, so
+        # the next connect re-seeds from scratch). See :meth:`_car_changed`.
+        self._car_key: str = ""
         # Queued connection — emitted from UI, lands on the worker thread.
         # Subclasses override ``set_hz`` to mutate their own QTimer.
         # pylint: disable-next=no-member
@@ -63,3 +67,22 @@ class TelemetrySource(QObject):
     def set_hz(self, hz: int) -> None:
         """Live-change the polling rate. Default no-op; subclasses with
         a :class:`QTimer` override to call ``setInterval`` on it."""
+
+    def _car_changed(self, car_key: str, frame: TelemetryFrame) -> bool:
+        """Adopt ``car_key`` as the current car, resetting ``frame`` if
+        it differs from the one the frame was built for.
+
+        Returns True exactly once per change, so the caller can also
+        clear its own per-car caches (parsed car data, static spec
+        sheets, derivation state) and re-seed them for the new car.
+
+        A blank key is ignored: some games leave the identity slot empty
+        for the first frames of a session, and treating that as a car
+        change would reset the frame on every tick until it fills in.
+        """
+        key = (car_key or "").strip()
+        if not key or key == self._car_key:
+            return False
+        self._car_key = key
+        frame.reset_for_car(key)
+        return True

@@ -153,6 +153,9 @@ class WheelView(DraggableWidget):
         # and monotonic shrinkage from there.
         self._pad_w_max = 0.0
         self._disc_w_max = 0.0
+        # Car identity the high-water marks above were learned under —
+        # the source bumps ``WheelData.car_epoch`` on every car change.
+        self._car_epoch = 0
         self._last_paint = time.monotonic()
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
@@ -161,6 +164,14 @@ class WheelView(DraggableWidget):
         return self._id
 
     def set_data(self, data: WheelData) -> None:
+        if data.car_epoch != self._car_epoch:
+            # New car — the brake-wear scale and the compound curve were
+            # calibrated for the previous one.
+            self._car_epoch = data.car_epoch
+            self._pad_w_max = 0.0
+            self._disc_w_max = 0.0
+            self._temp = TireTemp(DEFAULT_TIRE_TEMP_CURVE)
+            self._loaded_temp_curve = None
         self._data = data
         # Rebuild the per-compound TireTemp when the source publishes a
         # new curve (AC1 on car/compound change). ``is not`` is the right

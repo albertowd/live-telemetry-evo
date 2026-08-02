@@ -72,11 +72,30 @@ class EngineView(DraggableWidget):
         # ICE cars hit none of these and the bar stays hidden.
         self._kers_visible = False
         self._kers_spawn_charge: float | None = None
+        # Car identity the state above was learned under. The source
+        # bumps ``EngineData.car_epoch`` when the player changes car;
+        # everything self-calibrated for the old car has to go with it.
+        self._car_epoch = 0
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def set_data(self, data: EngineData) -> None:
+        if data.car_epoch != self._car_epoch:
+            self._car_epoch = data.car_epoch
+            self._reset_learned_state()
         self._data = data
         self.update()
+
+    def _reset_learned_state(self) -> None:
+        """Forget everything calibrated against the previous car: the
+        colour Power curve, the observed power peak (otherwise a 150 hp
+        car keeps the 800 hp scale of the one before it) and the
+        battery-bar auto-detect."""
+        self._power = Power.from_torque_curve(DEFAULT_TORQUE_CURVE)
+        self._loaded_torque_curve = None
+        self._observed_peak_hp = 0.0
+        self._observed_peak_rpm = 0.0
+        self._kers_visible = False
+        self._kers_spawn_charge = None
 
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
