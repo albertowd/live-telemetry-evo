@@ -76,7 +76,7 @@ Above the boost bar, a [B]hybrid battery bar[/B] appears on cars equipped with a
 
 A strip of driver-aid chips appears only while each condition is true so the bar stays compact: pit limiter, TC (bright when cutting, dim when armed), ABS (same scheme), ESC, launch control, DRS (bright when deployed, dim when only available), ERS charging, OT (overtake / max-deploy mode), HEAT (ERS heat charging), KMAX / CMAX (per-lap deploy / charge cap reached), wrong-way warning, invalid-lap and last-lap markers.
 
-The bottom row shows water / oil temperature, oil and fuel pressure, exhaust temperature, battery voltage, battery temperature, fuel litres, and brake bias percentage. Cells that the running game does not publish are hidden automatically.
+The bottom row shows water / oil temperature, oil and fuel pressure, exhaust temperature, battery voltage, battery temperature, fuel litres, and brake bias percentage. Cells that the running game does not publish are hidden automatically. On ACC the brake bias matches the in-car dash: the game publishes a raw value that each car's dash shifts by a fixed amount before displaying it, and the overlay applies that per-car offset from Kunos' own documentation.
 
 [SIZE=5][B]Inputs Widget[/B][/SIZE]
 
