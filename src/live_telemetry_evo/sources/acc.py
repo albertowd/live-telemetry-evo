@@ -32,9 +32,10 @@ A few quirks worth noting upstream of the apply step:
   to it (the slot stays at its default). We flip ``has_tire_wear`` False
   so the wear bar hides instead of pinning a stuck-fresh value.
 * ``brakeBias`` has a per-car offset that the dash adds before display
-  (see Appendix 4 in the PDF). We use the raw value as-is — close enough
-  for a 0..1 widget, off by a couple of percent against the in-car
-  HUD readout.
+  (Appendix 4 in the PDF). We apply it from the generated
+  :mod:`.acc_cars` table, so the readout matches the number the driver
+  sees in the car — the raw value runs up to 21 points high (Porsche 991
+  GT3 R). Cars the documentation doesn't cover keep the raw value.
 * Several physics fields are present in the struct but **ACC never
   populates them** (the PDF colour-codes them as unused; the colour
   is lost in text extraction). Confirmed empirically as flat zero on
@@ -62,6 +63,7 @@ from ..interpolation import (Curve, DEFAULT_BRAKE_TEMP_CURVE,
                               DEFAULT_TIRE_TEMP_CURVE)
 from ..logbook import log
 from ..telemetry import TelemetryFrame, WHEEL_IDS
+from .acc_cars import dash_bias_offset
 from ._win32_mapping import NamedMapping
 from .base import TelemetrySource
 
@@ -402,6 +404,10 @@ class AccTelemetrySource(TelemetrySource):
         self._static_susp_max: dict[str, float] = {}
         # Ticks left before the next static re-read (car-change check).
         self._static_poll = 0
+        # Percentage points the current car's dash adds to the raw brake
+        # bias before display (Appendix 4). Re-read on every car change;
+        # 0.0 for cars the documentation doesn't cover.
+        self._bias_offset = 0.0
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / hz))
         # pylint: disable-next=no-member  # QTimer.timeout is a PySide6 Signal
@@ -488,6 +494,12 @@ class AccTelemetrySource(TelemetrySource):
 
     def _apply_static(self, st: _SPageFileStatic) -> None:
         """ACC's static block still carries the car spec, just like AC1."""
+        # Per-car dash constants from the documentation (see acc_cars).
+        # Looked up here so _apply_physics stays a dict-free hot path.
+        self._bias_offset = dash_bias_offset(getattr(st, "carModel", ""))
+        if self._bias_offset:
+            log(f"[acc] brake-bias dash offset {self._bias_offset:+.0f} "
+                f"for {self._car_key}")
         e = self._frame.engine
         if st.maxRpm > 0:
             e.max_rpm = float(st.maxRpm)
@@ -517,7 +529,16 @@ class AccTelemetrySource(TelemetrySource):
         e.tc_level = float(ph.tc)
         e.abs_level = float(ph.abs)
         e.pit_limiter = bool(ph.pitLimiterOn)
-        e.brake_bias = float(ph.brakeBias)
+        # Raw + the car's dash offset, so the readout matches the in-car
+        # display. Only applied to a live reading: a 0.0 means "not
+        # published", and shifting that negative would just clamp to 0
+        # and hide the cell. Clamped because the offset is documented
+        # per car, not per setup — a car parked at an extreme bias
+        # shouldn't be able to push the fraction out of range.
+        raw_bias = float(ph.brakeBias)
+        if raw_bias > 0.0:
+            raw_bias = max(0.0, min(1.0, raw_bias + self._bias_offset / 100.0))
+        e.brake_bias = raw_bias
         # currentMaxRpm replaces AC1's static maxRpm when present. Range-
         # check defensively — anything ≤ 1000 is almost certainly a
         # dead-slot read or a type mismatch we should ignore.
