@@ -130,12 +130,12 @@ One widget per corner. The inner face of the tire always points toward the scree
 [*][COLOR=rgb(226, 80, 65)]red[/COLOR]: below 40 %.
 [/LIST]
 [*][B]Tire dirt overlay[/B] — brown rectangle that grows from the bottom of the silhouette as the tire picks up off-track grass and gravel.
-[*][B]Suspension bar[/B] — tinted graphic on the outer side of the wheel. The bar fills at full extension and shrinks as the suspension compresses (kept from the original LiveTelemetry plugin for parity). When the game supplies a per-car maximum travel (Kunos AC1 cars, ACC, AC Rally), the bar uses it as the engineered limit and [COLOR=rgb(226, 80, 65)]red[/COLOR] correctly reads as "bottoming out" on stiff F1-style suspension that brushes the limit. Otherwise the bar self-calibrates against the maximum observed (AC EVO always, mod cars without the static value).
+[*][B]Suspension bar[/B] — tinted graphic on the outer side of the wheel. The bar fills at full extension (droop) and shrinks as the suspension compresses (kept from the original LiveTelemetry plugin for parity). Its 100 % is one of two references, and the mid-band colour tells you which: the car data's total mechanical travel when the game supplies it (Kunos AC1 and AC Rally cars), or the deepest compression seen so far this session when it doesn't (AC EVO always, ACC, mod cars). [B]It is not your setup:[/B] no Assetto title publishes bump-stop or packer position, so reducing the travel range in the setup screen doesn't shrink the bar's scale — it changes how much of the bar you use. In the self-calibrating mode the reference is a high-water mark, so a single big kerb strike or off-track drop can set it for the rest of the session and the [COLOR=rgb(226, 80, 65)]red[/COLOR] band stops appearing until you change car.
 [LIST]
-[*][COLOR=rgb(226, 226, 226)]white[/COLOR]: mid-travel, engineered limit known.
-[*][COLOR=rgb(44, 130, 201)]blue[/COLOR]: mid-travel while using a self-calibrated maximum.
-[*][COLOR=rgb(247, 218, 100)]yellow[/COLOR]: outside ±10 % of the calibrated max.
-[*][COLOR=rgb(226, 80, 65)]red[/COLOR]: outside ±5 % (on the bump-stops).
+[*][COLOR=rgb(226, 226, 226)]white[/COLOR]: mid-travel, reference is the car's mechanical limit.
+[*][COLOR=rgb(44, 130, 201)]blue[/COLOR]: mid-travel, reference is the session's deepest compression.
+[*][COLOR=rgb(247, 218, 100)]yellow[/COLOR]: outside ±10 % of that reference.
+[*][COLOR=rgb(226, 80, 65)]red[/COLOR]: outside ±5 % — bottoming out when the reference is the car's limit, "as far as you've been" when it's self-calibrated.
 [/LIST]
 [*][B]Brake disc[/B] — top-inner icon. On AC EVO / ACC / AC Rally it's tinted by disc temperature (peak grip around 400 ºC); on AC1 the game never writes [COLOR=rgb(44, 130, 201)]brakeTemp[/COLOR], so the icon sits on a neutral white base with no °C label.
 [LIST]

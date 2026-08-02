@@ -437,6 +437,12 @@ class WheelView(DraggableWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
 
     def _draw_suspension(self, p: QPainter, d: WheelData) -> None:
+        """Live compression against ``susp_m_t`` — the car's mechanical
+        travel limit, or the deepest compression seen this session when
+        the game publishes no limit. Not the setup's bump-stop range:
+        nothing in shared memory exposes where the packers sit, so this
+        bar can't answer "am I on the packers?" unless the reference
+        happens to be a real engineered limit (white mid-band)."""
         rect = QRectF(self._x_left(346.0, 64.0), TOP_MARGIN, 64.0, 256.0)
         travel = (d.susp_t / d.susp_m_t) if d.susp_m_t > 0.0 else 0.5
 

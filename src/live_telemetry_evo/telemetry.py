@@ -17,14 +17,25 @@ class WheelData:
     height: float = 0.0       # mm, ride height
     lock: bool = False
     susp_t: float = 0.0       # current suspension travel (m)
-    susp_m_t: float = 0.0     # max observed travel (m); 0 = uncalibrated
+    # Reference travel the widget draws ``susp_t`` against (m); 0 =
+    # uncalibrated. Either the car data's total mechanical travel or, when
+    # the game doesn't publish one, a one-way high-water mark of observed
+    # compression — see ``susp_v``. Never the setup's bump-stop/packer
+    # range: no game publishes that.
+    susp_m_t: float = 0.0
     # True when ``susp_m_t`` came from a rolling-max calibration rather
-    # than a static-supplied limit (typically: mod cars or AC EVO, whose
-    # static block dropped the field). The suspension widget colours
-    # this case blue in the middle band so the user can see the bar is
-    # tracking observed peaks rather than the engineered limit — and so
-    # the brief "ratio==1.0" at calibration startup doesn't read as a
-    # false bottoming-out red.
+    # than a static-supplied limit (typically: mod cars, ACC — whose docs
+    # mark the field "Not shown in ACC" — or AC EVO, whose static block
+    # dropped it). The suspension widget colours this case blue in the
+    # middle band so the user can see the bar is tracking observed peaks
+    # rather than the engineered limit — and so the brief "ratio==1.0" at
+    # calibration startup doesn't read as a false bottoming-out red.
+    #
+    # Known limitation: the rolling max only ever grows, so one impact
+    # (kerb strike, landing, off-track drop) can set the reference for
+    # the whole session and leave the yellow/red bands unreachable
+    # afterwards. Verified on a logged stint: an off-track kerb hit
+    # raised one corner's reference 21 % in two ticks.
     susp_v: bool = False
     tire_d: float = 0.0       # dirt level 0..4
     tire_l: float = 0.0       # vertical load, Newtons
