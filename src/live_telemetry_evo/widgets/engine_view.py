@@ -402,7 +402,12 @@ class EngineView(DraggableWidget):
         if d.fuel_liters > 0.0:
             cells.append(("fuel", "FUEL", f"{d.fuel_liters:.0f}L"))
         if d.brake_bias > 0.0:
-            cells.append(("car-brake-parking", "BBIAS", f"{int(d.brake_bias * 100)}%F"))
+            # Round, don't truncate. The games publish the bias as a
+            # single-precision fraction, so a 69 % setting arrives as
+            # 0.68999999 and int() floored it to 68 — a full point low on
+            # almost every setting the driver dials in.
+            cells.append(("car-brake-parking", "BBIAS",
+                          f"{round(d.brake_bias * 100)}%F"))
         if not cells:
             return
 

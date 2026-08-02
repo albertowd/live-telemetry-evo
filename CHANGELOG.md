@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Changing car without restarting the game kept the previous car's power scale, ideal pressures and calibrated maxima — all of it re-seeds on a car change now.
+- Brake bias read one point low (a 69 % setting showed 68 %) — the readout truncated the game's value instead of rounding it.
 - Fitting a compound the car files don't describe kept the previous compound's temperature window instead of the default curve.
 - AC Rally's spec sheet is picked up when the game fills it in, instead of only at connect time.
 
