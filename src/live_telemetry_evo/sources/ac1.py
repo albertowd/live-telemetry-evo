@@ -525,8 +525,9 @@ class AcTelemetrySource(TelemetrySource):
         self._torque_lut = Curve(torque_pts)
         # Hand the raw torque curve to the engine widget so it can build
         # the colour band against the real per-car peak HP RPM instead
-        # of the default 5500 RPM curve baked into engine_view. List
-        # identity change is the widget's "new car" signal.
+        # of the default 5500 RPM curve baked into engine_view. The
+        # widget rebuilds when the published points differ from the ones
+        # it last built from.
         self._frame.engine.torque_curve_nm = list(torque_pts)
 
     def _refresh_compound_curves(self, compound: str) -> None:
@@ -540,8 +541,8 @@ class AcTelemetrySource(TelemetrySource):
         self._tire_curves = {}
         self._ideal_pressure_psi = {}
         # Reset per-wheel frame state so the widget rebuilds its curves
-        # when the compound changes mid-stint. Assigning fresh lists is
-        # the widget's "new compound loaded" signal.
+        # when the compound changes mid-stint — an empty list clears the
+        # widget's cached curve, the new points rebuild it.
         for wid in WHEEL_IDS:
             w = self._frame.wheels[wid]
             w.temp_curve_pts = []

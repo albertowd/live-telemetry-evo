@@ -84,8 +84,9 @@ class WheelData:
     # for this wheel, when the source can supply one (AC1 reads
     # PERFORMANCE_CURVE from tyres.ini's THERMAL_<section>). Empty =
     # no per-car curve; the wheel widget falls back to the default
-    # tire-temp curve. Widget rebuilds its colour curve by list
-    # identity (`is not`) so per-frame writes are cheap.
+    # tire-temp curve. The widget rebuilds its colour curve only when
+    # the points differ from the ones it last built from, so re-publishing
+    # the same curve every frame is cheap.
     temp_curve_pts: list[tuple[float, float]] = field(default_factory=list)
     # Per-compound ideal cold pressure (psi) from PRESSURE_IDEAL —
     # sources already fold this into tire_p_norm, so this is the raw
@@ -115,9 +116,9 @@ class EngineData:
     # Per-car torque-vs-RPM curve from the source when available (AC1
     # parses engine.ini's POWER_CURVE .lut). Empty = no per-car curve;
     # the engine widget falls back to a default or to a self-calibrated
-    # band from observed BHP. The widget rebuilds its colour curve when
-    # this list reference changes (sources assign a fresh list per car
-    # load), so per-frame writes are cheap.
+    # band from observed BHP. The widget rebuilds its colour curve only
+    # when the points differ from the ones it last built from, so
+    # re-publishing the same curve every frame is cheap.
     torque_curve_nm: list[tuple[float, float]] = field(default_factory=list)
     # AC1/Evo gear convention: 0=R, 1=N, 2+ = forward gears (display as N-1).
     gear: int = 1

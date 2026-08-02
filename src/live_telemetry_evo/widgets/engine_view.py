@@ -86,12 +86,14 @@ class EngineView(DraggableWidget):
         self.update()
 
     def _reset_learned_state(self) -> None:
-        """Forget everything calibrated against the previous car: the
-        colour Power curve, the observed power peak (otherwise a 150 hp
-        car keeps the 800 hp scale of the one before it) and the
-        battery-bar auto-detect."""
-        self._power = Power.from_torque_curve(DEFAULT_TORQUE_CURVE)
-        self._loaded_torque_curve = None
+        """Forget what was calibrated against the previous car: the
+        observed power peak (otherwise a 150 hp car keeps the 800 hp
+        scale of the one before it) and the battery-bar auto-detect.
+
+        The colour Power curve isn't handled here — the source
+        republishes ``torque_curve_nm`` per car and the value check in
+        :meth:`paintEvent` rebuilds from that (or from the default when
+        the new car has no curve)."""
         self._observed_peak_hp = 0.0
         self._observed_peak_rpm = 0.0
         self._kers_visible = False
@@ -120,15 +122,19 @@ class EngineView(DraggableWidget):
             ratio = min(1.0, d.rpm / d.max_rpm) if d.max_rpm > 0.0 else 0.0
         # Rebuild the colour Power curve when the source publishes a new
         # per-car torque curve (AC1 loads engine.ini's POWER_CURVE .lut
-        # via the ACD). List identity change = new car loaded; ``is not``
-        # is the right comparison since sources assign a fresh list.
-        if (d.torque_curve_nm
-                and d.torque_curve_nm is not self._loaded_torque_curve):
-            self._power = Power.from_torque_curve(d.torque_curve_nm)
-            self._loaded_torque_curve = d.torque_curve_nm
-            # Discard the observed-peak fallback state when we have a
-            # real curve — its peak RPM was learned against the wrong
-            # default and would now mis-steer the colour bands.
+        # via the ACD). Compared by value, not identity: the FrameBus
+        # deep-copies every frame, so the list arrives as a fresh object
+        # each tick and an ``is not`` check would rebuild the curve on
+        # every single paint.
+        if d.torque_curve_nm != self._loaded_torque_curve:
+            # An empty list means "no per-car curve" (no ACD, or a car
+            # whose data we couldn't read) — fall back to the default
+            # rather than keep the previous car's curve.
+            self._power = Power.from_torque_curve(
+                d.torque_curve_nm or DEFAULT_TORQUE_CURVE)
+            self._loaded_torque_curve = list(d.torque_curve_nm)
+            # Discard the observed-peak fallback state either way: it was
+            # learned against a curve that no longer applies.
             self._observed_peak_hp = 0.0
             self._observed_peak_rpm = 0.0
 

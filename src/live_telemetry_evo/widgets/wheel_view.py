@@ -135,12 +135,12 @@ class WheelView(DraggableWidget):
         self._psi = TirePsi()
         self._temp = TireTemp(DEFAULT_TIRE_TEMP_CURVE)
         self._brake_temp = TireTemp(DEFAULT_BRAKE_TEMP_CURVE)
-        # Reference identity of the per-compound temp curve last used to
-        # build ``self._temp``. Sources that can supply a real curve
-        # (AC1 via the ACD's THERMAL_<section>.PERFORMANCE_CURVE) assign
-        # a fresh list on each compound change; we detect that via
-        # ``is not`` and rebuild so the cold-vs-hot side decision is
-        # picked off the right peak temp instead of the default 90 °C.
+        # The per-compound temp curve last used to build ``self._temp``.
+        # Sources that can supply a real curve (AC1 via the ACD's
+        # THERMAL_<section>.PERFORMANCE_CURVE) publish a new one on each
+        # compound change; we rebuild on a value change so the
+        # cold-vs-hot side decision is picked off the right peak temp
+        # instead of the default 90 °C.
         self._loaded_temp_curve: list[tuple[float, float]] | None = None
         self._height_warn_until = 0.0
         self._lock_warn_until = 0.0
@@ -165,21 +165,26 @@ class WheelView(DraggableWidget):
 
     def set_data(self, data: WheelData) -> None:
         if data.car_epoch != self._car_epoch:
-            # New car — the brake-wear scale and the compound curve were
-            # calibrated for the previous one.
+            # New car — the brake-wear scale was calibrated against the
+            # previous one's padLife / discLife range. (The compound
+            # curve needs no special case here: the source republishes
+            # it per car, and the value check below picks that up.)
             self._car_epoch = data.car_epoch
             self._pad_w_max = 0.0
             self._disc_w_max = 0.0
-            self._temp = TireTemp(DEFAULT_TIRE_TEMP_CURVE)
-            self._loaded_temp_curve = None
         self._data = data
-        # Rebuild the per-compound TireTemp when the source publishes a
-        # new curve (AC1 on car/compound change). ``is not`` is the right
-        # comparison since sources assign a fresh list per change.
-        if (data.temp_curve_pts
-                and data.temp_curve_pts is not self._loaded_temp_curve):
-            self._temp = TireTemp(data.temp_curve_pts)
-            self._loaded_temp_curve = data.temp_curve_pts
+        # Track the per-compound TireTemp curve the source publishes (AC1
+        # reloads it from the ACD on every compound change, so a pit stop
+        # onto a different compound lands here mid-session).
+        #
+        # Compared by value: the FrameBus deep-copies each frame, so an
+        # identity check would rebuild the curve on every paint. An empty
+        # list is meaningful — it says the new compound has no curve — so
+        # it has to drop us back to the default rather than leave the
+        # previous compound's window in place.
+        if data.temp_curve_pts != self._loaded_temp_curve:
+            self._temp = TireTemp(data.temp_curve_pts or DEFAULT_TIRE_TEMP_CURVE)
+            self._loaded_temp_curve = list(data.temp_curve_pts)
         self.update()
 
     def _x_left(self, x: float, w: float) -> float:
